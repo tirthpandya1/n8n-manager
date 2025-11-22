@@ -1,0 +1,43 @@
+# N8N Encryption Key Configuration
+# 
+# This file shows how to set up the encryption key for n8n.
+# The encryption key is CRITICAL for credential security and portability.
+#
+# IMPORTANT: The same encryption key MUST be used on both source and destination
+# instances for credentials to work properly after migration.
+
+# Method 1: Environment Variable (Recommended)
+# Set this in your shell profile or system environment
+export N8N_ENCRYPTION_KEY="your-32-character-encryption-key-here"
+
+# Method 2: Docker Environment Variable
+# Add this to your docker-compose.yml or docker run command
+N8N_ENCRYPTION_KEY=your-32-character-encryption-key-here
+
+# Method 3: Create a secure key file (Advanced)
+# Store the key in a secure file and source it
+echo "your-32-character-encryption-key-here" > ~/.n8n_encryption_key
+chmod 600 ~/.n8n_encryption_key
+export N8N_ENCRYPTION_KEY=$(cat ~/.n8n_encryption_key)
+
+# Generating a new encryption key (if starting fresh):
+# You can generate a secure 32-character key using:
+# openssl rand -hex 16
+# or
+# node -e "console.log(require('crypto').randomBytes(16).toString('hex'))"
+
+# SECURITY NOTES:
+# 1. Never commit the actual key to version control
+# 2. Store the key securely and back it up separately
+# 3. Use the same key across all n8n instances that need to share credentials
+# 4. If you lose the key, encrypted credentials cannot be recovered
+
+# Example of a properly formatted key (DO NOT USE THIS EXAMPLE):
+# N8N_ENCRYPTION_KEY="a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6"
+
+# For Docker Compose, your environment section might look like:
+# environment:
+#   - N8N_ENCRYPTION_KEY=your-32-character-encryption-key-here
+#   - N8N_HOST=localhost
+#   - N8N_PORT=5678
+#   - N8N_PROTOCOL=http

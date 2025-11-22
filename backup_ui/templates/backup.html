@@ -1,0 +1,301 @@
+{% extends "base.html" %}
+
+{% block title %}Backup Management - N8N Backup Utility{% endblock %}
+{% block nav_backup %}border-blue-500 text-gray-900{% endblock %}
+
+{% block content %}
+<div x-data="backupData()" x-init="init()">
+    <!-- Page Header -->
+    <div class="px-4 py-5 sm:px-6">
+        <div class="flex justify-between items-center">
+            <div>
+                <h1 class="text-3xl font-bold text-gray-900">Backup Management</h1>
+                <p class="mt-1 text-sm text-gray-600">Create and manage your N8N backups</p>
+            </div>
+            <button @click="showCreateModal = true" class="inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700">
+                <svg class="-ml-1 mr-2 h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+                </svg>
+                Create Backup
+            </button>
+        </div>
+    </div>
+
+    <!-- Create Backup Modal -->
+    <div x-show="showCreateModal" x-cloak class="fixed z-10 inset-0 overflow-y-auto" aria-labelledby="modal-title" role="dialog" aria-modal="true">
+        <div class="flex items-end justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
+            <div class="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity" @click="showCreateModal = false"></div>
+            <span class="hidden sm:inline-block sm:align-middle sm:h-screen">&#8203;</span>
+            <div class="inline-block align-bottom bg-white rounded-lg px-4 pt-5 pb-4 text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full sm:p-6">
+                <div>
+                    <div class="mt-3 text-center sm:mt-0 sm:text-left">
+                        <h3 class="text-lg leading-6 font-medium text-gray-900" id="modal-title">Create New Backup</h3>
+                        <div class="mt-4 space-y-4">
+                            <!-- Backup Type -->
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700">Backup Type</label>
+                                <select x-model="createForm.backup_type" class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md">
+                                    <option value="native">Native N8N</option>
+                                    <option value="docker">Docker (Standard)</option>
+                                    <option value="enhanced">Docker (Enhanced)</option>
+                                </select>
+                            </div>
+
+                            <!-- Container Selection (Docker only) -->
+                            <div x-show="createForm.backup_type !== 'native'">
+                                <label class="block text-sm font-medium text-gray-700">Docker Container</label>
+                                <select x-model="createForm.container_name" class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md">
+                                    <option value="">Auto-detect</option>
+                                    <template x-for="container in containers" :key="container.name">
+                                        <option :value="container.name" x-text="container.name + ' (' + container.status + ')'"></option>
+                                    </template>
+                                </select>
+                            </div>
+
+                            <!-- Enhanced Options (Enhanced only) -->
+                            <div x-show="createForm.backup_type === 'enhanced'" class="space-y-2">
+                                <div class="flex items-center">
+                                    <input x-model="createForm.include_volumes" type="checkbox" id="include_volumes" class="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded">
+                                    <label for="include_volumes" class="ml-2 block text-sm text-gray-900">Include Docker volumes</label>
+                                </div>
+                                <div class="flex items-center">
+                                    <input x-model="createForm.include_logs" type="checkbox" id="include_logs" class="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded">
+                                    <label for="include_logs" class="ml-2 block text-sm text-gray-900">Include container logs</label>
+                                </div>
+                            </div>
+
+                            <!-- Progress Display -->
+                            <div x-show="creating" class="mt-4">
+                                <div class="bg-gray-50 rounded-lg p-4 max-h-60 overflow-y-auto">
+                                    <template x-for="(line, index) in progressLines" :key="index">
+                                        <p class="text-xs font-mono"
+                                           :class="{
+                                               'text-green-600': line.includes('SUCCESS'),
+                                               'text-red-600': line.includes('ERROR'),
+                                               'text-yellow-600': line.includes('WARNING'),
+                                               'text-blue-600': line.includes('INFO'),
+                                               'text-gray-600': !line.includes('SUCCESS') && !line.includes('ERROR') && !line.includes('WARNING') && !line.includes('INFO')
+                                           }"
+                                           x-text="line"></p>
+                                    </template>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="mt-5 sm:mt-4 sm:flex sm:flex-row-reverse">
+                    <button @click="createBackup()" :disabled="creating" type="button"
+                            class="w-full inline-flex justify-center rounded-md border border-transparent shadow-sm px-4 py-2 bg-blue-600 text-base font-medium text-white hover:bg-blue-700 focus:outline-none sm:ml-3 sm:w-auto sm:text-sm disabled:opacity-50 disabled:cursor-not-allowed">
+                        <span x-show="!creating">Create Backup</span>
+                        <span x-show="creating">Creating...</span>
+                    </button>
+                    <button @click="closeCreateModal()" type="button" :disabled="creating"
+                            class="mt-3 w-full inline-flex justify-center rounded-md border border-gray-300 shadow-sm px-4 py-2 bg-white text-base font-medium text-gray-700 hover:bg-gray-50 focus:outline-none sm:mt-0 sm:w-auto sm:text-sm disabled:opacity-50 disabled:cursor-not-allowed">
+                        <span x-show="!creating">Cancel</span>
+                        <span x-show="creating">Close</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Backups List -->
+    <div class="px-4 py-5 sm:px-6">
+        <div class="bg-white shadow rounded-lg">
+            <div class="px-4 py-5 sm:px-6 border-b border-gray-200">
+                <h3 class="text-lg leading-6 font-medium text-gray-900">Available Backups</h3>
+                <p class="mt-1 text-sm text-gray-500">Total: <span x-text="backups.length"></span> backup(s) - <span x-text="formatSize(totalSize)"></span></p>
+            </div>
+            <div class="px-4 py-5 sm:p-6">
+                <template x-if="backups.length === 0">
+                    <div class="text-center py-8">
+                        <svg class="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4" />
+                        </svg>
+                        <h3 class="mt-2 text-sm font-medium text-gray-900">No backups found</h3>
+                        <p class="mt-1 text-sm text-gray-500">Create your first backup to get started.</p>
+                    </div>
+                </template>
+                <template x-if="backups.length > 0">
+                    <div class="overflow-x-auto">
+                        <table class="min-w-full divide-y divide-gray-200">
+                            <thead class="bg-gray-50">
+                                <tr>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Type</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Size</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Workflows</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody class="bg-white divide-y divide-gray-200">
+                                <template x-for="backup in backups" :key="backup.name">
+                                    <tr>
+                                        <td class="px-6 py-4 text-sm font-medium text-gray-900">
+                                            <div class="max-w-xs truncate" :title="backup.name" x-text="backup.name"></div>
+                                        </td>
+                                        <td class="px-6 py-4 whitespace-nowrap text-sm">
+                                            <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full"
+                                                  :class="getBackupTypeClass(backup.backup_type)"
+                                                  x-text="backup.backup_type"></span>
+                                        </td>
+                                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500" x-text="backup.created_date"></td>
+                                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500" x-text="backup.size_mb + ' MB'"></td>
+                                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500" x-text="backup.workflows_count"></td>
+                                        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium space-x-2">
+                                            <a :href="'/api/backup/download/' + backup.name" class="text-blue-600 hover:text-blue-900">Download</a>
+                                            <button @click="deleteBackup(backup.name)" class="text-red-600 hover:text-red-900">Delete</button>
+                                        </td>
+                                    </tr>
+                                </template>
+                            </tbody>
+                        </table>
+                    </div>
+                </template>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+function backupData() {
+    return {
+        backups: [],
+        containers: [],
+        showCreateModal: false,
+        creating: false,
+        progressLines: [],
+        createForm: {
+            backup_type: 'docker',
+            container_name: '',
+            include_volumes: false,
+            include_logs: false
+        },
+
+        async init() {
+            await this.loadBackups();
+            await this.loadContainers();
+        },
+
+        async loadBackups() {
+            try {
+                const res = await fetch('/api/backup/list');
+                const data = await res.json();
+                if (data.success) {
+                    this.backups = data.backups;
+                }
+            } catch (error) {
+                console.error('Failed to load backups:', error);
+                showToast('Failed to load backups', 'error');
+            }
+        },
+
+        async loadContainers() {
+            try {
+                const res = await fetch('/api/status/docker');
+                const data = await res.json();
+                if (data.success && data.docker_available) {
+                    this.containers = data.containers;
+                }
+            } catch (error) {
+                console.error('Failed to load containers:', error);
+            }
+        },
+
+        async createBackup() {
+            this.creating = true;
+            this.progressLines = [];
+
+            try {
+                const response = await fetch('/api/backup/create', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(this.createForm)
+                });
+
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+
+                    const chunk = decoder.decode(value);
+                    const lines = chunk.split('\n');
+
+                    for (const line of lines) {
+                        if (line.startsWith('data: ')) {
+                            const data = JSON.parse(line.slice(6));
+                            if (data.message) {
+                                this.progressLines.push(data.message);
+                            }
+                            if (data.error) {
+                                this.progressLines.push('ERROR: ' + data.error);
+                            }
+                        }
+                    }
+                }
+
+                showToast('Backup created successfully', 'success');
+                await this.loadBackups();
+            } catch (error) {
+                console.error('Backup failed:', error);
+                showToast('Backup failed: ' + error.message, 'error');
+            } finally {
+                this.creating = false;
+            }
+        },
+
+        closeCreateModal() {
+            if (!this.creating) {
+                this.showCreateModal = false;
+                this.progressLines = [];
+            }
+        },
+
+        async deleteBackup(name) {
+            if (!confirm(`Are you sure you want to delete backup: ${name}?`)) {
+                return;
+            }
+
+            try {
+                const res = await fetch(`/api/backup/delete/${encodeURIComponent(name)}`, {
+                    method: 'DELETE'
+                });
+                const data = await res.json();
+
+                if (data.success) {
+                    showToast('Backup deleted successfully', 'success');
+                    await this.loadBackups();
+                } else {
+                    showToast('Failed to delete backup: ' + data.error, 'error');
+                }
+            } catch (error) {
+                console.error('Delete failed:', error);
+                showToast('Failed to delete backup', 'error');
+            }
+        },
+
+        get totalSize() {
+            return this.backups.reduce((sum, b) => sum + b.size_mb, 0);
+        },
+
+        formatSize(mb) {
+            if (mb < 1) return '<1 MB';
+            if (mb < 1024) return mb.toFixed(1) + ' MB';
+            return (mb / 1024).toFixed(2) + ' GB';
+        },
+
+        getBackupTypeClass(type) {
+            const classes = {
+                'native': 'bg-blue-100 text-blue-800',
+                'docker': 'bg-green-100 text-green-800',
+                'enhanced_docker': 'bg-purple-100 text-purple-800'
+            };
+            return classes[type] || 'bg-gray-100 text-gray-800';
+        }
+    }
+}
+</script>
+{% endblock %}

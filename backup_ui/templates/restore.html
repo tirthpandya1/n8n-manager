@@ -1,0 +1,245 @@
+{% extends "base.html" %}
+
+{% block title %}Restore Backup - N8N Backup Utility{% endblock %}
+{% block nav_restore %}border-blue-500 text-gray-900{% endblock %}
+
+{% block content %}
+<div x-data="restoreData()" x-init="init()">
+    <!-- Page Header -->
+    <div class="px-4 py-5 sm:px-6">
+        <h1 class="text-3xl font-bold text-gray-900">Restore Backup</h1>
+        <p class="mt-1 text-sm text-gray-600">Restore your N8N instance from a backup</p>
+    </div>
+
+    <!-- Restore Form -->
+    <div class="px-4 py-5 sm:px-6">
+        <div class="bg-white shadow rounded-lg">
+            <div class="px-4 py-5 sm:p-6">
+                <div class="space-y-6">
+                    <!-- Backup Selection -->
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700">Select Backup</label>
+                        <select x-model="restoreForm.backup_name" @change="loadBackupDetails()" class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md">
+                            <option value="">-- Select a backup --</option>
+                            <template x-for="backup in backups" :key="backup.name">
+                                <option :value="backup.name" x-text="backup.name + ' (' + backup.created_date + ')'"></option>
+                            </template>
+                        </select>
+                    </div>
+
+                    <!-- Backup Details -->
+                    <div x-show="selectedBackup" class="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                        <h4 class="text-sm font-medium text-blue-900 mb-2">Backup Information</h4>
+                        <dl class="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+                            <dt class="text-blue-700">Type:</dt>
+                            <dd class="text-blue-900 font-medium" x-text="selectedBackup?.backup_type"></dd>
+                            <dt class="text-blue-700">Date:</dt>
+                            <dd class="text-blue-900" x-text="selectedBackup?.created_date"></dd>
+                            <dt class="text-blue-700">Size:</dt>
+                            <dd class="text-blue-900" x-text="selectedBackup?.size_mb + ' MB'"></dd>
+                            <dt class="text-blue-700">Workflows:</dt>
+                            <dd class="text-blue-900" x-text="selectedBackup?.workflows_count"></dd>
+                            <dt class="text-blue-700">Compressed:</dt>
+                            <dd class="text-blue-900" x-text="selectedBackup?.is_compressed ? 'Yes' : 'No'"></dd>
+                        </dl>
+                    </div>
+
+                    <!-- Restore Type -->
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700">Restore Type</label>
+                        <select x-model="restoreForm.restore_type" class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md">
+                            <option value="native">Native N8N</option>
+                            <option value="docker">Docker (Standard)</option>
+                            <option value="enhanced">Docker (Enhanced)</option>
+                        </select>
+                    </div>
+
+                    <!-- Container Selection (Docker only) -->
+                    <div x-show="restoreForm.restore_type !== 'native'">
+                        <label class="block text-sm font-medium text-gray-700">Docker Container</label>
+                        <select x-model="restoreForm.container_name" class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md">
+                            <option value="">Auto-detect</option>
+                            <template x-for="container in containers" :key="container.name">
+                                <option :value="container.name" x-text="container.name + ' (' + container.status + ')'"></option>
+                            </template>
+                        </select>
+                    </div>
+
+                    <!-- Enhanced Options (Enhanced only) -->
+                    <div x-show="restoreForm.restore_type === 'enhanced'" class="space-y-2">
+                        <div class="flex items-center">
+                            <input x-model="restoreForm.recreate_container" type="checkbox" id="recreate_container" class="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded">
+                            <label for="recreate_container" class="ml-2 block text-sm text-gray-900">Recreate container from backup configuration</label>
+                        </div>
+                    </div>
+
+                    <!-- Warning Message -->
+                    <div class="bg-yellow-50 border-l-4 border-yellow-400 p-4">
+                        <div class="flex">
+                            <div class="flex-shrink-0">
+                                <svg class="h-5 w-5 text-yellow-400" fill="currentColor" viewBox="0 0 20 20">
+                                    <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"/>
+                                </svg>
+                            </div>
+                            <div class="ml-3">
+                                <p class="text-sm text-yellow-700">
+                                    <strong>Warning:</strong> This will import workflows and credentials to your N8N instance. Existing workflows with the same names may be overwritten. Make sure you have a current backup before proceeding.
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Progress Display -->
+                    <div x-show="restoring" class="mt-4">
+                        <div class="bg-gray-50 rounded-lg p-4 max-h-80 overflow-y-auto">
+                            <h4 class="text-sm font-medium text-gray-900 mb-2">Restore Progress</h4>
+                            <template x-for="(line, index) in progressLines" :key="index">
+                                <p class="text-xs font-mono"
+                                   :class="{
+                                       'text-green-600': line.includes('SUCCESS'),
+                                       'text-red-600': line.includes('ERROR'),
+                                       'text-yellow-600': line.includes('WARNING'),
+                                       'text-blue-600': line.includes('INFO'),
+                                       'text-gray-600': !line.includes('SUCCESS') && !line.includes('ERROR') && !line.includes('WARNING') && !line.includes('INFO')
+                                   }"
+                                   x-text="line"></p>
+                            </template>
+                        </div>
+                    </div>
+
+                    <!-- Action Buttons -->
+                    <div class="flex justify-end space-x-3">
+                        <a href="/backup" class="inline-flex items-center px-4 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50">
+                            Cancel
+                        </a>
+                        <button @click="confirmRestore()" :disabled="!restoreForm.backup_name || restoring" type="button"
+                                class="inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-green-600 hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed">
+                            <svg class="-ml-1 mr-2 h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                            </svg>
+                            <span x-show="!restoring">Restore Backup</span>
+                            <span x-show="restoring">Restoring...</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+function restoreData() {
+    return {
+        backups: [],
+        containers: [],
+        selectedBackup: null,
+        restoring: false,
+        progressLines: [],
+        restoreForm: {
+            backup_name: '',
+            restore_type: 'docker',
+            container_name: '',
+            recreate_container: false
+        },
+
+        async init() {
+            await this.loadBackups();
+            await this.loadContainers();
+        },
+
+        async loadBackups() {
+            try {
+                const res = await fetch('/api/backup/list');
+                const data = await res.json();
+                if (data.success) {
+                    this.backups = data.backups;
+                }
+            } catch (error) {
+                console.error('Failed to load backups:', error);
+                showToast('Failed to load backups', 'error');
+            }
+        },
+
+        async loadContainers() {
+            try {
+                const res = await fetch('/api/status/docker');
+                const data = await res.json();
+                if (data.success && data.docker_available) {
+                    this.containers = data.containers;
+                }
+            } catch (error) {
+                console.error('Failed to load containers:', error);
+            }
+        },
+
+        async loadBackupDetails() {
+            if (!this.restoreForm.backup_name) {
+                this.selectedBackup = null;
+                return;
+            }
+
+            try {
+                const res = await fetch(`/api/backup/details/${encodeURIComponent(this.restoreForm.backup_name)}`);
+                const data = await res.json();
+                if (data.success) {
+                    this.selectedBackup = data.backup;
+                }
+            } catch (error) {
+                console.error('Failed to load backup details:', error);
+                showToast('Failed to load backup details', 'error');
+            }
+        },
+
+        confirmRestore() {
+            const message = `Are you sure you want to restore from backup: ${this.restoreForm.backup_name}?\n\nThis will overwrite existing workflows and credentials in your N8N instance.`;
+            if (confirm(message)) {
+                this.restoreBackup();
+            }
+        },
+
+        async restoreBackup() {
+            this.restoring = true;
+            this.progressLines = [];
+
+            try {
+                const response = await fetch('/api/backup/restore', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(this.restoreForm)
+                });
+
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+
+                    const chunk = decoder.decode(value);
+                    const lines = chunk.split('\n');
+
+                    for (const line of lines) {
+                        if (line.startsWith('data: ')) {
+                            const data = JSON.parse(line.slice(6));
+                            if (data.message) {
+                                this.progressLines.push(data.message);
+                            }
+                            if (data.error) {
+                                this.progressLines.push('ERROR: ' + data.error);
+                            }
+                        }
+                    }
+                }
+
+                showToast('Restore completed successfully', 'success');
+            } catch (error) {
+                console.error('Restore failed:', error);
+                showToast('Restore failed: ' + error.message, 'error');
+            } finally {
+                this.restoring = false;
+            }
+        }
+    }
+}
+</script>
+{% endblock %}

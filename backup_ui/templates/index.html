@@ -1,0 +1,290 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - N8N Backup Utility{% endblock %}
+{% block nav_dashboard %}border-blue-500 text-gray-900{% endblock %}
+
+{% block content %}
+<div x-data="dashboardData()" x-init="init()">
+    <!-- Page Header -->
+    <div class="px-4 py-5 sm:px-6">
+        <h1 class="text-3xl font-bold text-gray-900">Dashboard</h1>
+        <p class="mt-1 text-sm text-gray-600">Overview of your N8N backup system</p>
+    </div>
+
+    <!-- Status Cards -->
+    <div class="px-4 py-5 sm:px-6">
+        <div class="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4">
+            <!-- Docker Status Card -->
+            <div class="bg-white overflow-hidden shadow rounded-lg">
+                <div class="p-5">
+                    <div class="flex items-center">
+                        <div class="flex-shrink-0">
+                            <svg class="h-6 w-6" :class="dockerStatus.docker_available ? 'text-green-500' : 'text-red-500'" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            </svg>
+                        </div>
+                        <div class="ml-5 w-0 flex-1">
+                            <dl>
+                                <dt class="text-sm font-medium text-gray-500 truncate">Docker Status</dt>
+                                <dd class="flex items-baseline">
+                                    <div class="text-2xl font-semibold text-gray-900" x-text="dockerStatus.docker_available ? 'Available' : 'Unavailable'"></div>
+                                </dd>
+                            </dl>
+                        </div>
+                    </div>
+                </div>
+                <div class="bg-gray-50 px-5 py-3">
+                    <div class="text-sm">
+                        <span class="font-medium text-gray-700" x-text="dockerStatus.container_count"></span>
+                        <span class="text-gray-500"> N8N container(s)</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Total Backups Card -->
+            <div class="bg-white overflow-hidden shadow rounded-lg">
+                <div class="p-5">
+                    <div class="flex items-center">
+                        <div class="flex-shrink-0">
+                            <svg class="h-6 w-6 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" />
+                            </svg>
+                        </div>
+                        <div class="ml-5 w-0 flex-1">
+                            <dl>
+                                <dt class="text-sm font-medium text-gray-500 truncate">Total Backups</dt>
+                                <dd class="flex items-baseline">
+                                    <div class="text-2xl font-semibold text-gray-900" x-text="storage.total_backups"></div>
+                                </dd>
+                            </dl>
+                        </div>
+                    </div>
+                </div>
+                <div class="bg-gray-50 px-5 py-3">
+                    <a href="/backup" class="text-sm font-medium text-blue-600 hover:text-blue-500">
+                        Manage backups →
+                    </a>
+                </div>
+            </div>
+
+            <!-- Storage Usage Card -->
+            <div class="bg-white overflow-hidden shadow rounded-lg">
+                <div class="p-5">
+                    <div class="flex items-center">
+                        <div class="flex-shrink-0">
+                            <svg class="h-6 w-6 text-yellow-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4" />
+                            </svg>
+                        </div>
+                        <div class="ml-5 w-0 flex-1">
+                            <dl>
+                                <dt class="text-sm font-medium text-gray-500 truncate">Storage Used</dt>
+                                <dd class="flex items-baseline">
+                                    <div class="text-2xl font-semibold text-gray-900" x-text="formatSize(storage.total_size_mb)"></div>
+                                </dd>
+                            </dl>
+                        </div>
+                    </div>
+                </div>
+                <div class="bg-gray-50 px-5 py-3">
+                    <div class="text-sm text-gray-500 truncate" x-text="storage.backups_dir"></div>
+                </div>
+            </div>
+
+            <!-- Encryption Status Card -->
+            <div class="bg-white overflow-hidden shadow rounded-lg">
+                <div class="p-5">
+                    <div class="flex items-center">
+                        <div class="flex-shrink-0">
+                            <svg class="h-6 w-6" :class="encryptionKey ? 'text-green-500' : 'text-red-500'" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
+                            </svg>
+                        </div>
+                        <div class="ml-5 w-0 flex-1">
+                            <dl>
+                                <dt class="text-sm font-medium text-gray-500 truncate">Encryption Key</dt>
+                                <dd class="flex items-baseline">
+                                    <div class="text-2xl font-semibold text-gray-900" x-text="encryptionKey ? 'Configured' : 'Missing'"></div>
+                                </dd>
+                            </dl>
+                        </div>
+                    </div>
+                </div>
+                <div class="bg-gray-50 px-5 py-3">
+                    <a href="/config" class="text-sm font-medium text-blue-600 hover:text-blue-500">
+                        Configure →
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Recent Backups Section -->
+    <div class="px-4 py-5 sm:px-6">
+        <div class="bg-white shadow rounded-lg">
+            <div class="px-4 py-5 sm:px-6 border-b border-gray-200">
+                <h3 class="text-lg leading-6 font-medium text-gray-900">Recent Backups</h3>
+                <p class="mt-1 text-sm text-gray-500">Your most recent backup files</p>
+            </div>
+            <div class="px-4 py-5 sm:p-6">
+                <template x-if="recentBackups.length === 0">
+                    <div class="text-center py-8">
+                        <svg class="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4" />
+                        </svg>
+                        <h3 class="mt-2 text-sm font-medium text-gray-900">No backups</h3>
+                        <p class="mt-1 text-sm text-gray-500">Get started by creating your first backup.</p>
+                        <div class="mt-6">
+                            <a href="/backup" class="inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700">
+                                Create Backup
+                            </a>
+                        </div>
+                    </div>
+                </template>
+                <template x-if="recentBackups.length > 0">
+                    <div class="overflow-x-auto">
+                        <table class="min-w-full divide-y divide-gray-200">
+                            <thead class="bg-gray-50">
+                                <tr>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Type</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Size</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Workflows</th>
+                                </tr>
+                            </thead>
+                            <tbody class="bg-white divide-y divide-gray-200">
+                                <template x-for="backup in recentBackups" :key="backup.name">
+                                    <tr>
+                                        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900" x-text="backup.name"></td>
+                                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                            <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full"
+                                                  :class="getBackupTypeClass(backup.backup_type)"
+                                                  x-text="backup.backup_type"></span>
+                                        </td>
+                                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500" x-text="backup.created_date"></td>
+                                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500" x-text="backup.size_mb + ' MB'"></td>
+                                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500" x-text="backup.workflows_count"></td>
+                                    </tr>
+                                </template>
+                            </tbody>
+                        </table>
+                    </div>
+                </template>
+            </div>
+        </div>
+    </div>
+
+    <!-- Quick Actions -->
+    <div class="px-4 py-5 sm:px-6">
+        <h3 class="text-lg leading-6 font-medium text-gray-900 mb-4">Quick Actions</h3>
+        <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
+            <a href="/backup" class="relative rounded-lg border border-gray-300 bg-white px-6 py-5 shadow-sm flex items-center space-x-3 hover:border-gray-400">
+                <div class="flex-shrink-0">
+                    <svg class="h-10 w-10 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v3m0 0v3m0-3h3m-3 0H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                </div>
+                <div class="flex-1 min-w-0">
+                    <span class="absolute inset-0" aria-hidden="true"></span>
+                    <p class="text-sm font-medium text-gray-900">Create Backup</p>
+                    <p class="text-sm text-gray-500">Backup your N8N instance</p>
+                </div>
+            </a>
+
+            <a href="/restore" class="relative rounded-lg border border-gray-300 bg-white px-6 py-5 shadow-sm flex items-center space-x-3 hover:border-gray-400">
+                <div class="flex-shrink-0">
+                    <svg class="h-10 w-10 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                    </svg>
+                </div>
+                <div class="flex-1 min-w-0">
+                    <span class="absolute inset-0" aria-hidden="true"></span>
+                    <p class="text-sm font-medium text-gray-900">Restore Backup</p>
+                    <p class="text-sm text-gray-500">Restore from a backup file</p>
+                </div>
+            </a>
+
+            <a href="/config" class="relative rounded-lg border border-gray-300 bg-white px-6 py-5 shadow-sm flex items-center space-x-3 hover:border-gray-400">
+                <div class="flex-shrink-0">
+                    <svg class="h-10 w-10 text-purple-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                    </svg>
+                </div>
+                <div class="flex-1 min-w-0">
+                    <span class="absolute inset-0" aria-hidden="true"></span>
+                    <p class="text-sm font-medium text-gray-900">Configuration</p>
+                    <p class="text-sm text-gray-500">Manage encryption keys</p>
+                </div>
+            </a>
+        </div>
+    </div>
+</div>
+
+<script>
+function dashboardData() {
+    return {
+        dockerStatus: { docker_available: false, container_count: 0, containers: [] },
+        storage: { total_backups: 0, total_size_mb: 0, backups_dir: '' },
+        recentBackups: [],
+        encryptionKey: null,
+
+        async init() {
+            await this.loadData();
+            // Refresh every 30 seconds
+            setInterval(() => this.loadData(), 30000);
+        },
+
+        async loadData() {
+            try {
+                // Load Docker status
+                const dockerRes = await fetch('/api/status/docker');
+                const dockerData = await dockerRes.json();
+                if (dockerData.success) {
+                    this.dockerStatus = dockerData;
+                }
+
+                // Load storage info
+                const storageRes = await fetch('/api/backup/storage');
+                const storageData = await storageRes.json();
+                if (storageData.success) {
+                    this.storage = storageData.storage;
+                }
+
+                // Load recent backups
+                const backupsRes = await fetch('/api/backup/list');
+                const backupsData = await backupsRes.json();
+                if (backupsData.success) {
+                    this.recentBackups = backupsData.backups.slice(0, 5);
+                }
+
+                // Load encryption key status
+                const keyRes = await fetch('/api/config/encryption-key');
+                const keyData = await keyRes.json();
+                if (keyData.success) {
+                    this.encryptionKey = keyData.key_info;
+                }
+            } catch (error) {
+                console.error('Failed to load dashboard data:', error);
+            }
+        },
+
+        formatSize(mb) {
+            if (mb < 1) return '<1 MB';
+            if (mb < 1024) return mb.toFixed(1) + ' MB';
+            return (mb / 1024).toFixed(2) + ' GB';
+        },
+
+        getBackupTypeClass(type) {
+            const classes = {
+                'native': 'bg-blue-100 text-blue-800',
+                'docker': 'bg-green-100 text-green-800',
+                'enhanced_docker': 'bg-purple-100 text-purple-800'
+            };
+            return classes[type] || 'bg-gray-100 text-gray-800';
+        }
+    }
+}
+</script>
+{% endblock %}

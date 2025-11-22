@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//mnt/c/Users/Admin/Code/Projects/Voice-Agent-Platform-Final/voice-agent-platform/frontend/src/**)",
+      "Read(//mnt/c/Users/Admin/Code/Projects/Voice-Agent-Platform-Final/voice-agent-platform/backend/**)",
+      "WebSearch",
+      "WebFetch(domain:docs.livekit.io)",
+      "WebFetch(domain:elevenlabs.io)",
+      "Read(//mnt/c/Users/Admin/Code/Projects/Voice-Agent-Platform-Final/voice-agent-platform/frontend/**)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

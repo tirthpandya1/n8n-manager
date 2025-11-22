@@ -1,0 +1,323 @@
+{% extends "base.html" %}
+
+{% block title %}Configuration - N8N Backup Utility{% endblock %}
+{% block nav_config %}border-blue-500 text-gray-900{% endblock %}
+
+{% block content %}
+<div x-data="configData()" x-init="init()">
+    <!-- Page Header -->
+    <div class="px-4 py-5 sm:px-6">
+        <h1 class="text-3xl font-bold text-gray-900">Configuration</h1>
+        <p class="mt-1 text-sm text-gray-600">Manage encryption keys and system settings</p>
+    </div>
+
+    <!-- Encryption Key Section -->
+    <div class="px-4 py-5 sm:px-6">
+        <div class="bg-white shadow rounded-lg">
+            <div class="px-4 py-5 sm:px-6 border-b border-gray-200">
+                <h3 class="text-lg leading-6 font-medium text-gray-900">Encryption Key Management</h3>
+                <p class="mt-1 text-sm text-gray-500">N8N requires an encryption key to secure credentials and sensitive data</p>
+            </div>
+            <div class="px-4 py-5 sm:p-6">
+                <!-- Current Key Status -->
+                <div class="mb-6">
+                    <h4 class="text-sm font-medium text-gray-900 mb-3">Current Key Status</h4>
+                    <template x-if="!keyInfo">
+                        <div class="bg-red-50 border border-red-200 rounded-lg p-4">
+                            <div class="flex">
+                                <div class="flex-shrink-0">
+                                    <svg class="h-5 w-5 text-red-400" fill="currentColor" viewBox="0 0 20 20">
+                                        <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"/>
+                                    </svg>
+                                </div>
+                                <div class="ml-3">
+                                    <h3 class="text-sm font-medium text-red-800">No Encryption Key Found</h3>
+                                    <p class="mt-2 text-sm text-red-700">
+                                        An encryption key is required for N8N to function properly. Please generate or configure a key below.
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                    </template>
+                    <template x-if="keyInfo">
+                        <div class="bg-green-50 border border-green-200 rounded-lg p-4">
+                            <div class="flex">
+                                <div class="flex-shrink-0">
+                                    <svg class="h-5 w-5 text-green-400" fill="currentColor" viewBox="0 0 20 20">
+                                        <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
+                                    </svg>
+                                </div>
+                                <div class="ml-3 flex-1">
+                                    <h3 class="text-sm font-medium text-green-800">Encryption Key Configured</h3>
+                                    <dl class="mt-2 text-sm text-green-700 space-y-1">
+                                        <div class="flex justify-between">
+                                            <dt>Key (masked):</dt>
+                                            <dd class="font-mono" x-text="keyInfo.masked"></dd>
+                                        </div>
+                                        <div class="flex justify-between">
+                                            <dt>Source:</dt>
+                                            <dd class="capitalize" x-text="keyInfo.source.replace('_', ' ')"></dd>
+                                        </div>
+                                        <div class="flex justify-between">
+                                            <dt>Length:</dt>
+                                            <dd :class="keyInfo.valid ? 'text-green-700' : 'text-red-700'" x-text="keyInfo.length + ' characters ' + (keyInfo.valid ? '✓' : '✗ (should be 32)')"></dd>
+                                        </div>
+                                        <div x-show="keyInfo.path" class="flex justify-between">
+                                            <dt>Path:</dt>
+                                            <dd class="text-xs truncate max-w-md" :title="keyInfo.path" x-text="keyInfo.path"></dd>
+                                        </div>
+                                    </dl>
+                                </div>
+                            </div>
+                        </div>
+                    </template>
+                </div>
+
+                <!-- Generate New Key -->
+                <div class="mb-6">
+                    <h4 class="text-sm font-medium text-gray-900 mb-3">Generate New Key</h4>
+                    <div class="bg-gray-50 border border-gray-200 rounded-lg p-4">
+                        <p class="text-sm text-gray-600 mb-4">Generate a new 32-character encryption key. You can save it to your configuration after generation.</p>
+                        <div class="flex items-center space-x-3">
+                            <button @click="generateKey()" type="button" class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700">
+                                <svg class="-ml-1 mr-2 h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                                </svg>
+                                Generate Key
+                            </button>
+                            <template x-if="generatedKey">
+                                <div class="flex-1 flex items-center space-x-2">
+                                    <input type="text" :value="showGeneratedKey ? generatedKey : generatedKeyMasked" readonly
+                                           class="flex-1 font-mono text-sm border-gray-300 rounded-md bg-white">
+                                    <button @click="showGeneratedKey = !showGeneratedKey" type="button" class="p-2 text-gray-400 hover:text-gray-600">
+                                        <svg x-show="!showGeneratedKey" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                                        </svg>
+                                        <svg x-show="showGeneratedKey" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
+                                        </svg>
+                                    </button>
+                                    <button @click="copyToClipboard(generatedKey)" type="button" class="p-2 text-gray-400 hover:text-gray-600" title="Copy to clipboard">
+                                        <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                                        </svg>
+                                    </button>
+                                </div>
+                            </template>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Save Key -->
+                <div x-show="generatedKey">
+                    <h4 class="text-sm font-medium text-gray-900 mb-3">Save Generated Key</h4>
+                    <div class="bg-gray-50 border border-gray-200 rounded-lg p-4">
+                        <p class="text-sm text-gray-600 mb-4">Choose where to save the generated encryption key:</p>
+                        <div class="space-y-3">
+                            <div class="flex items-center">
+                                <input x-model="saveLocation" type="radio" id="save_custom" value="custom" class="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300">
+                                <label for="save_custom" class="ml-2 block text-sm text-gray-900">
+                                    Custom location (backend/n8n/config/.n8n_encryption_key)
+                                </label>
+                            </div>
+                            <div class="flex items-center">
+                                <input x-model="saveLocation" type="radio" id="save_n8n" value="n8n_config" class="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300">
+                                <label for="save_n8n" class="ml-2 block text-sm text-gray-900">
+                                    N8N config file (~/.n8n/config)
+                                </label>
+                            </div>
+                        </div>
+                        <div class="mt-4">
+                            <button @click="saveKey()" type="button" class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-green-600 hover:bg-green-700">
+                                <svg class="-ml-1 mr-2 h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
+                                </svg>
+                                Save Key
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Docker Containers Section -->
+    <div class="px-4 py-5 sm:px-6">
+        <div class="bg-white shadow rounded-lg">
+            <div class="px-4 py-5 sm:px-6 border-b border-gray-200">
+                <h3 class="text-lg leading-6 font-medium text-gray-900">Docker Containers</h3>
+                <p class="mt-1 text-sm text-gray-500">Manage N8N Docker containers</p>
+            </div>
+            <div class="px-4 py-5 sm:p-6">
+                <template x-if="!dockerAvailable">
+                    <div class="text-center py-6">
+                        <svg class="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                        </svg>
+                        <h3 class="mt-2 text-sm font-medium text-gray-900">Docker Not Available</h3>
+                        <p class="mt-1 text-sm text-gray-500">Docker is not installed or not running on this system.</p>
+                    </div>
+                </template>
+                <template x-if="dockerAvailable && containers.length === 0">
+                    <div class="text-center py-6">
+                        <svg class="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4" />
+                        </svg>
+                        <h3 class="mt-2 text-sm font-medium text-gray-900">No N8N Containers</h3>
+                        <p class="mt-1 text-sm text-gray-500">No N8N containers found on this system.</p>
+                    </div>
+                </template>
+                <template x-if="dockerAvailable && containers.length > 0">
+                    <div class="overflow-x-auto">
+                        <table class="min-w-full divide-y divide-gray-200">
+                            <thead class="bg-gray-50">
+                                <tr>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Image</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody class="bg-white divide-y divide-gray-200">
+                                <template x-for="container in containers" :key="container.id">
+                                    <tr>
+                                        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900" x-text="container.name"></td>
+                                        <td class="px-6 py-4 whitespace-nowrap text-sm">
+                                            <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full"
+                                                  :class="container.status === 'running' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'"
+                                                  x-text="container.status"></span>
+                                        </td>
+                                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500" x-text="container.image"></td>
+                                        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                                            <button @click="restartContainer(container.name)" class="text-blue-600 hover:text-blue-900">Restart</button>
+                                        </td>
+                                    </tr>
+                                </template>
+                            </tbody>
+                        </table>
+                    </div>
+                </template>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+function configData() {
+    return {
+        keyInfo: null,
+        generatedKey: null,
+        generatedKeyMasked: '',
+        showGeneratedKey: false,
+        saveLocation: 'custom',
+        dockerAvailable: false,
+        containers: [],
+
+        async init() {
+            await this.loadKeyInfo();
+            await this.loadDockerInfo();
+        },
+
+        async loadKeyInfo() {
+            try {
+                const res = await fetch('/api/config/encryption-key');
+                const data = await res.json();
+                if (data.success) {
+                    this.keyInfo = data.key_info;
+                }
+            } catch (error) {
+                console.error('Failed to load key info:', error);
+            }
+        },
+
+        async loadDockerInfo() {
+            try {
+                const res = await fetch('/api/status/docker');
+                const data = await res.json();
+                if (data.success) {
+                    this.dockerAvailable = data.docker_available;
+                    this.containers = data.containers;
+                }
+            } catch (error) {
+                console.error('Failed to load Docker info:', error);
+            }
+        },
+
+        async generateKey() {
+            try {
+                const res = await fetch('/api/config/encryption-key/generate', { method: 'POST' });
+                const data = await res.json();
+                if (data.success) {
+                    this.generatedKey = data.key;
+                    this.generatedKeyMasked = data.masked;
+                    this.showGeneratedKey = false;
+                    showToast('Encryption key generated successfully', 'success');
+                }
+            } catch (error) {
+                console.error('Failed to generate key:', error);
+                showToast('Failed to generate key', 'error');
+            }
+        },
+
+        async saveKey() {
+            if (!this.generatedKey) {
+                showToast('No key to save', 'error');
+                return;
+            }
+
+            try {
+                const res = await fetch('/api/config/encryption-key/save', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        key: this.generatedKey,
+                        location: this.saveLocation
+                    })
+                });
+                const data = await res.json();
+
+                if (data.success) {
+                    showToast('Encryption key saved successfully', 'success');
+                    this.generatedKey = null;
+                    await this.loadKeyInfo();
+                } else {
+                    showToast('Failed to save key: ' + data.error, 'error');
+                }
+            } catch (error) {
+                console.error('Failed to save key:', error);
+                showToast('Failed to save key', 'error');
+            }
+        },
+
+        async restartContainer(name) {
+            if (!confirm(`Restart container: ${name}?`)) return;
+
+            try {
+                const res = await fetch(`/api/status/container/${name}/restart`, { method: 'POST' });
+                const data = await res.json();
+
+                if (data.success) {
+                    showToast('Container restarted successfully', 'success');
+                    await this.loadDockerInfo();
+                } else {
+                    showToast('Failed to restart container', 'error');
+                }
+            } catch (error) {
+                console.error('Failed to restart container:', error);
+                showToast('Failed to restart container', 'error');
+            }
+        },
+
+        copyToClipboard(text) {
+            navigator.clipboard.writeText(text).then(() => {
+                showToast('Copied to clipboard', 'success');
+            }).catch(err => {
+                console.error('Failed to copy:', err);
+                showToast('Failed to copy to clipboard', 'error');
+            });
+        }
+    }
+}
+</script>
+{% endblock %}

@@ -1,0 +1,32 @@
+{
+  "native": {
+    "name": "Native n8n Instance (Mac)",
+    "type": "native",
+    "n8n_path": "/usr/local/bin/n8n",
+    "data_dir": "~/.n8n",
+    "workflows_dir": "~/.n8n/workflows",
+    "credentials_file": "~/.n8n/credentials.json",
+    "backup_dir": "./backups"
+  },
+  "docker": {
+    "name": "Docker n8n Instance",
+    "type": "docker",
+    "container_name": "n8n",
+    "docker_user": "node",
+    "data_dir": "/home/node/.n8n",
+    "workflows_dir": "/home/node/.n8n/workflows",
+    "credentials_file": "/home/node/.n8n/credentials.json",
+    "backup_dir": "./backups"
+  },
+  "backup_settings": {
+    "include_timestamp": true,
+    "compress_backups": true,
+    "max_backups": 10,
+    "auto_cleanup": true
+  },
+  "encryption": {
+    "key_env_var": "N8N_ENCRYPTION_KEY",
+    "key_file": "./config/.n8n_encryption_key",
+    "note": "The same encryption key must be used on both source and destination instances"
+  }
+}
