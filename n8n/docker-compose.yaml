@@ -1,0 +1,43 @@
+services:
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: n8n
+    environment:
+      - N8N_BASIC_AUTH_ACTIVE=true
+      - N8N_BASIC_AUTH_USER=admin
+      - N8N_BASIC_AUTH_PASSWORD=Ivoryt#1
+      - N8N_HOST=n8n.ivorytusk.co.in
+      - N8N_PORT=5678
+      - N8N_TRUST_PROXY=true
+      - N8N_PROTOCOL=https
+      - WEBHOOK_URL=https://n8n.ivorytusk.co.in
+      - GENERIC_TIMEZONE=Asia/Kolkata
+      - N8N_METRICS=true
+      - N8N_DIAGNOSTICS_ENABLED=false
+      - DB_TYPE=sqlite
+      - N8N_USER_MANAGEMENT_DISABLED=true
+    ports:
+      - "5678:5678"
+    volumes:
+      # Main n8n data directory
+      - n8n_data:/home/node/.n8n
+      # Optional: Mount local directories for workflows and credentials
+      # Uncomment below lines to sync with Voice Agent Platform
+      - C:\Users\Admin\Code\Utility\n8n-manager\n8n\n8n_data:/home/node/data
+    restart: always
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:5678/healthz || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - n8n_network
+
+networks:
+  n8n_network:
+    driver: bridge
+
+volumes:
+  n8n_data:
+    driver: local

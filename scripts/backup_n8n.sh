@@ -17,7 +17,7 @@ NC='\033[0m' # No Color
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 N8N_DIR="$(dirname "$SCRIPT_DIR")"
 CONFIG_FILE="$N8N_DIR/config/n8n_config.json"
-BACKUP_BASE_DIR="$N8N_DIR/backups"
+BACKUP_BASE_DIR="${N8N_BACKUP_DIR:-$N8N_DIR/backups}"
 
 # Default values
 INSTANCE_TYPE="native"
@@ -134,13 +134,21 @@ detect_encryption_key() {
         print_status "Key: ${env_key:0:8}...${env_key: -8} (${#env_key} characters)"
         
     else
-        print_error "No encryption key available!"
+        print_warning "No encryption key available on host!"
         print_status "Neither environment variable N8N_ENCRYPTION_KEY nor config file key found"
-        if [ ! -f "$config_file" ]; then
-            print_status "Config file not found at: $config_file"
-            print_status "You may need to run n8n at least once to generate the config"
+        
+        if [ "$INSTANCE_TYPE" = "docker" ]; then
+            print_status "Attempting to detect key from Docker container..."
+            docker_key=$(docker exec "$CONTAINER_NAME" printenv N8N_ENCRYPTION_KEY 2>/dev/null || true)
+            if [ -n "$docker_key" ]; then
+                export N8N_ENCRYPTION_KEY="$docker_key"
+                print_success "Using encryption key from Docker container"
+                return 0
+            fi
         fi
-        return 1
+
+        print_warning "Proceeding without N8N_ENCRYPTION_KEY. Backup might fail if credentials are encrypted."
+        return 0
     fi
 }
 
@@ -250,8 +258,25 @@ backup_workflows() {
     if [ "$INSTANCE_TYPE" = "native" ]; then
         $N8N_CMD export:workflow --all --separate --output="$WORKFLOWS_BACKUP_DIR"
     else
+        # Ensure clean state in container
+        docker exec -u node "$CONTAINER_NAME" rm -rf /tmp/workflows_export || true
+        docker exec -u node "$CONTAINER_NAME" mkdir -p /tmp/workflows_export
+        
+        # Export to container path
         docker exec -u node "$CONTAINER_NAME" n8n export:workflow --all --separate --output="/tmp/workflows_export"
-        docker cp "$CONTAINER_NAME:/tmp/workflows_export/." "$WORKFLOWS_BACKUP_DIR/"
+        
+        # Verify export
+        FILE_COUNT=$(docker exec -u node "$CONTAINER_NAME" sh -c "ls -1 /tmp/workflows_export | wc -l")
+        print_status "Found $FILE_COUNT files in export directory container"
+
+        if [ "$FILE_COUNT" -eq 0 ]; then
+             print_warning "No workflows exported! Check n8n logs or database."
+        else
+             # Copy from container to host
+             docker cp "$CONTAINER_NAME:/tmp/workflows_export/." "$WORKFLOWS_BACKUP_DIR/"
+        fi
+        
+        # Cleanup
         docker exec -u node "$CONTAINER_NAME" rm -rf /tmp/workflows_export
     fi
     
@@ -264,11 +289,11 @@ backup_credentials() {
     print_status "Exporting credentials..."
     
     if [ "$INSTANCE_TYPE" = "native" ]; then
-        $N8N_CMD export:credentials --all --decrypted --output="$CREDENTIALS_BACKUP_FILE"
+        $N8N_CMD export:credentials --all --decrypted --output="$CREDENTIALS_BACKUP_FILE" || true
     else
-        docker exec -u node "$CONTAINER_NAME" n8n export:credentials --all --decrypted --output="/tmp/credentials_export.json"
-        docker cp "$CONTAINER_NAME:/tmp/credentials_export.json" "$CREDENTIALS_BACKUP_FILE"
-        docker exec -u node "$CONTAINER_NAME" rm -f /tmp/credentials_export.json
+        docker exec -u node "$CONTAINER_NAME" n8n export:credentials --all --decrypted --output="/tmp/credentials_export.json" || true
+        docker cp "$CONTAINER_NAME:/tmp/credentials_export.json" "$CREDENTIALS_BACKUP_FILE" || true
+        docker exec -u node "$CONTAINER_NAME" rm -f /tmp/credentials_export.json || true
     fi
     
     if [ -f "$CREDENTIALS_BACKUP_FILE" ]; then

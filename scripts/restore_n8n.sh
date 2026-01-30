@@ -19,8 +19,8 @@ NC='\033[0m' # No Color
 # Get script directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 N8N_DIR="$(dirname "$SCRIPT_DIR")"
-CONFIG_FILE="$N8N_DIR/config/n8n_config.json"
-BACKUP_BASE_DIR="$N8N_DIR/backups"
+BACKUP_BASE_DIR="${N8N_BACKUP_DIR:-$N8N_DIR/backups}"
+NON_INTERACTIVE=false
 
 # Default values
 INSTANCE_TYPE="native"
@@ -54,6 +54,7 @@ show_usage() {
     echo "  docker              Restore to Docker n8n container"
     echo "  backup_name         Name of backup to restore (without .tar.gz extension)"
     echo "  container_name      Name of Docker container (default: n8n)"
+    echo "  --non-interactive   Skip confirmation prompts"
     echo ""
     echo "Examples:"
     echo "  $0 native native_backup_20240115_143022"
@@ -141,6 +142,23 @@ select_backup_interactive() {
     print_status "Selected backup: $BACKUP_NAME"
 }
 
+# Parse global flags first
+while [[ "$1" == --* ]]; do
+    case "$1" in
+        --non-interactive)
+            NON_INTERACTIVE=true
+            shift
+            ;;
+        --help)
+            show_usage
+            exit 0
+            ;;
+        *)
+            break
+            ;;
+    esac
+done
+
 # Parse command line arguments
 if [ $# -eq 0 ]; then
     print_error "Missing required arguments"
@@ -227,13 +245,12 @@ detect_encryption_key() {
         print_status "Key: ${env_key:0:8}...${env_key: -8} (${#env_key} characters)"
         
     else
-        print_error "No encryption key available!"
+        print_warning "No encryption key found. Credentials may not be decrypted correctly."
         print_status "Neither environment variable N8N_ENCRYPTION_KEY nor config file key found"
         if [ ! -f "$config_file" ]; then
             print_status "Config file not found at: $config_file"
-            print_status "You may need to run n8n at least once to generate the config"
         fi
-        return 1
+        return 0
     fi
 }
 
@@ -336,12 +353,51 @@ check_n8n_access() {
     fi
 }
 
+# Function to detect n8n version and set user ID for v2+
+detect_n8n_version_and_user() {
+    local n8n_version=""
+    local n8n_major_version=""
+
+    # Get n8n version
+    if [ "$INSTANCE_TYPE" = "native" ]; then
+        n8n_version=$($N8N_CMD --version 2>/dev/null | head -n1)
+    else
+        n8n_version=$(docker exec "$CONTAINER_NAME" n8n --version 2>/dev/null | head -n1)
+    fi
+
+    if [ -z "$n8n_version" ]; then
+        print_warning "Could not detect n8n version"
+        return 0
+    fi
+
+    print_status "Detected n8n version: $n8n_version"
+
+    # Extract major version (first digit before the dot)
+    n8n_major_version=$(echo "$n8n_version" | cut -d. -f1)
+
+    # Check if n8n v2 or higher
+    if [ "$n8n_major_version" -ge 2 ] 2>/dev/null; then
+        print_status "n8n v2+ detected - will use userId parameter for imports"
+
+        # Use a default UUID that n8n v2 accepts
+        # This will assign workflows to the first/default user
+        export N8N_USER_ID="00000000-0000-0000-0000-000000000000"
+
+        print_status "Using default user ID for workflow import: $N8N_USER_ID"
+    else
+        print_status "n8n v1 detected - userId parameter not needed"
+    fi
+}
+
 # Function to find and extract backup
 prepare_backup() {
     local backup_dir=""
-    local compressed_backup="$BACKUP_BASE_DIR/${BACKUP_NAME}.tar.gz"
-    local directory_backup="$BACKUP_BASE_DIR/$BACKUP_NAME"
     
+    # Strip extensions from BACKUP_NAME if present
+    CLEAN_BACKUP_NAME=$(echo "$BACKUP_NAME" | sed 's/\.tar\.gz$//' | sed 's/\.zip$//')
+    
+    local compressed_backup="$BACKUP_BASE_DIR/${CLEAN_BACKUP_NAME}.tar.gz"
+    local directory_backup="$BACKUP_BASE_DIR/$CLEAN_BACKUP_NAME"
     # Check if compressed backup exists
     if [ -f "$compressed_backup" ]; then
         print_status "Found compressed backup: $compressed_backup"
@@ -349,8 +405,46 @@ prepare_backup() {
         mkdir -p "$TEMP_EXTRACT_DIR"
         
         print_status "Extracting backup..."
-        tar -xzf "$compressed_backup" -C "$TEMP_EXTRACT_DIR"
-        backup_dir="$TEMP_EXTRACT_DIR/$BACKUP_NAME"
+        if ! tar -xzf "$compressed_backup" -C "$TEMP_EXTRACT_DIR"; then
+            print_error "Extraction failed - check if tar is installed and has permissions"
+            exit 1
+        fi
+        print_success "Extraction complete"
+        
+        # Check if the backup is in a subdirectory (Linux style) or root (Windows style)
+        if [ -d "$TEMP_EXTRACT_DIR/$CLEAN_BACKUP_NAME/workflows" ]; then
+            backup_dir="$TEMP_EXTRACT_DIR/$CLEAN_BACKUP_NAME"
+        elif [ -d "$TEMP_EXTRACT_DIR/workflows" ]; then
+            backup_dir="$TEMP_EXTRACT_DIR"
+        else
+            print_error "Invalid backup: workflows directory not found in extraction"
+            exit 1
+        fi
+        
+    # Check if zip backup exists
+    elif [ -f "$BACKUP_BASE_DIR/${CLEAN_BACKUP_NAME}.zip" ]; then
+        local zip_backup="$BACKUP_BASE_DIR/${CLEAN_BACKUP_NAME}.zip"
+        print_status "Found zip backup: $zip_backup"
+        TEMP_EXTRACT_DIR="$BACKUP_BASE_DIR/temp_extract_$$"
+        mkdir -p "$TEMP_EXTRACT_DIR"
+        
+        print_status "Extracting zip backup..."
+        if command -v unzip &> /dev/null; then
+            unzip -q "$zip_backup" -d "$TEMP_EXTRACT_DIR"
+        else
+            print_error "unzip command not found. Please install unzip."
+            exit 1
+        fi
+        
+        # Check structure
+        if [ -d "$TEMP_EXTRACT_DIR/$CLEAN_BACKUP_NAME/workflows" ]; then
+            backup_dir="$TEMP_EXTRACT_DIR/$CLEAN_BACKUP_NAME"
+        elif [ -d "$TEMP_EXTRACT_DIR/workflows" ]; then
+            backup_dir="$TEMP_EXTRACT_DIR"
+        else
+            print_error "Invalid backup: workflows directory not found in extraction"
+            exit 1
+        fi
         
     # Check if directory backup exists
     elif [ -d "$directory_backup" ]; then
@@ -398,6 +492,11 @@ check_encryption_key() {
         print_warning "Credentials may not import correctly without the same encryption key."
         print_status "Set the encryption key with: export N8N_ENCRYPTION_KEY='your_key_here'"
         
+        if [ "$NON_INTERACTIVE" = true ]; then
+            print_warning "Proceeding in non-interactive mode without encryption key."
+            return 0
+        fi
+        
         read -p "Continue anyway? (y/N): " -n 1 -r
         echo
         if [[ ! $REPLY =~ ^[Yy]$ ]]; then
@@ -411,6 +510,9 @@ check_encryption_key() {
 
 # Function to create confirmation prompt
 confirm_restore() {
+    if [ "$NON_INTERACTIVE" = true ]; then
+        return 0
+    fi
     print_warning "This will import workflows and credentials to your n8n instance."
     print_warning "Existing workflows with the same names may be overwritten!"
     print_status ""
@@ -438,23 +540,34 @@ restore_credentials() {
         if [ $? -eq 0 ]; then
             print_success "Credentials imported successfully"
         else
-            print_error "Failed to import credentials"
-            return 1
+            print_warning "Failed to import credentials (exit code: $?)"
         fi
     else
         # Copy credentials to container
         docker cp "$credentials_file" "$CONTAINER_NAME:/tmp/credentials_import.json"
-        docker exec -u node "$CONTAINER_NAME" n8n import:credentials --input=/tmp/credentials_import.json
+        
+        # Build import command
+        local cmd="n8n import:credentials --input=/tmp/credentials_import.json"
+        if [ -n "$N8N_USER_ID" ]; then
+            cmd="$cmd --userId=$N8N_USER_ID"
+        fi
+        
+        # Run import and capture status (avoid set -e crash)
+        set +e
+        docker exec -u node "$CONTAINER_NAME" $cmd
         local import_status=$?
-
+        
         # Cleanup (ignore errors)
-        docker exec -u node "$CONTAINER_NAME" rm -f /tmp/credentials_import.json 2>/dev/null
-
+        docker exec -u node "$CONTAINER_NAME" rm -f /tmp/credentials_import.json 2>/dev/null || true
+        set -e
+        
         if [ $import_status -eq 0 ]; then
             print_success "Credentials imported successfully"
         else
-            print_error "Failed to import credentials"
-            return 1
+            print_warning "Failed to import credentials (exit code: $import_status)"
+            if [[ "$import_status" -eq 1 ]]; then
+                print_status "TIP: If you see 'Project' matching errors, ensure you have created an owner user in the n8n UI first."
+            fi
         fi
     fi
 }
@@ -472,27 +585,99 @@ restore_workflows() {
     print_status "Importing $workflow_count workflows..."
 
     if [ "$INSTANCE_TYPE" = "native" ]; then
-        $N8N_CMD import:workflow --separate --input="$workflows_dir"
-        if [ $? -eq 0 ]; then
-            print_success "Workflows imported successfully"
+        # Build import command
+        if [ -n "$N8N_USER_ID" ]; then
+            print_status "Importing workflows for n8n v2 with User ID: $N8N_USER_ID"
+            local success_count=0
+            local fail_count=0
+            for wf_file in "$workflows_dir"/*.json; do
+                [ -e "$wf_file" ] || continue
+                print_status "  Importing $(basename "$wf_file")..."
+                set +e
+                $N8N_CMD import:workflow --input="$wf_file" --userId="$N8N_USER_ID" > /dev/null 2>&1
+                if [ $? -eq 0 ]; then
+                    success_count=$((success_count + 1))
+                else
+                    print_warning "  Failed to import $(basename "$wf_file")"
+                    fail_count=$((fail_count + 1))
+                fi
+                set -e
+            done
+            print_status "Import summary: $success_count succeeded, $fail_count failed"
+            if [ $fail_count -eq 0 ]; then
+                print_success "All workflows imported successfully"
+            else
+                print_warning "Some workflows failed to import. You may need to check node versions."
+            fi
         else
-            print_error "Failed to import workflows"
-            return 1
+            $N8N_CMD import:workflow --separate --input="$workflows_dir"
+            if [ $? -eq 0 ]; then
+                print_success "Workflows imported successfully"
+            else
+                print_error "Failed to import workflows"
+                return 1
+            fi
         fi
     else
         # Copy workflows to container
         docker exec -u node "$CONTAINER_NAME" mkdir -p /tmp/workflows_import
         docker cp "$workflows_dir/." "$CONTAINER_NAME:/tmp/workflows_import/"
-        docker exec -u node "$CONTAINER_NAME" n8n import:workflow --separate --input=/tmp/workflows_import
-        local import_status=$?
+
+        if [ "$n8n_major_version" -ge 2 ] 2>/dev/null && [ -n "$N8N_USER_ID" ]; then
+            print_status "Importing workflows for n8n v2 with User ID: $N8N_USER_ID"
+            local success_count=0
+            local fail_count=0
+            
+            # Get list of files in the container to loop over
+            local container_files=$(docker exec -u node "$CONTAINER_NAME" ls /tmp/workflows_import)
+            
+            for wf_file in $container_files; do
+                [[ "$wf_file" == *.json ]] || continue
+                print_status "  Importing $wf_file..."
+                set +e
+                docker exec -u node "$CONTAINER_NAME" n8n import:workflow --input="/tmp/workflows_import/$wf_file" --userId="$N8N_USER_ID" > /dev/null 2>&1
+                if [ $? -eq 0 ]; then
+                    success_count=$((success_count + 1))
+                else
+                    print_warning "  Failed to import $wf_file"
+                    fail_count=$((fail_count + 1))
+                fi
+                set -e
+            done
+            
+            print_status "Import summary: $success_count succeeded, $fail_count failed"
+            import_status=$([ $fail_count -eq 0 ] && echo 0 || echo 1)
+        else
+            # Standard import for v1 or v2 without specific User ID requirements for multiple files
+            if [ "$n8n_major_version" -ge 2 ] 2>/dev/null; then
+                print_status "Importing workflows for n8n v2..."
+            fi
+            
+            set +e
+            docker exec -u node "$CONTAINER_NAME" n8n import:workflow --separate --input=/tmp/workflows_import
+            import_status=$?
+            set -e
+        fi
 
         # Cleanup (ignore errors)
-        docker exec -u node "$CONTAINER_NAME" rm -rf /tmp/workflows_import 2>/dev/null
+        docker exec -u node "$CONTAINER_NAME" rm -rf /tmp/workflows_import 2>/dev/null || true
+        set -e
 
         if [ $import_status -eq 0 ]; then
             print_success "Workflows imported successfully"
         else
-            print_error "Failed to import workflows"
+            if [ "$n8n_major_version" -ge 2 ] 2>/dev/null; then
+                print_error "n8n v2 import failed (exit code: $import_status)."
+                echo ""
+                print_warning "SOLUTION: Import via n8n UI instead:"
+                print_status "1. Open your n8n interface"
+                print_status "2. Go to Workflows -> Import from File"
+                print_status "3. Import from: $workflows_dir"
+                echo ""
+                print_status "The UI will automatically assign workflows to your user."
+            else
+                print_error "Failed to import workflows"
+            fi
             return 1
         fi
     fi
@@ -531,6 +716,16 @@ verify_restore() {
         # For Docker, we could potentially check the database or API
         print_status "Restore completed. Please check your n8n interface to verify workflows and credentials."
     fi
+
+    # Migration Tips
+    if [ "$n8n_major_version" -ge 2 ] 2>/dev/null; then
+        echo ""
+        print_status "--- Migration Tips for n8n v2 ---"
+        print_status "* Code Nodes: Env vars are BLOCKED by default in v2. Set N8N_BLOCK_ENV_VARS_IN_CODE_NODES=false if needed."
+        print_status "* Sub-workflows: Behavior has changed. Test your Execute Workflow nodes."
+        print_status "* Ownership: Workflows were assigned to User ID: ${N8N_USER_ID:-[default owner]}"
+        print_status "--------------------------------"
+    fi
 }
 
 # Main execution
@@ -540,6 +735,7 @@ main() {
     
     # Check prerequisites
     check_n8n_access
+    detect_n8n_version_and_user
     prepare_backup
     show_backup_info
     check_encryption_key
@@ -550,7 +746,9 @@ main() {
     # Perform restore
     print_status "Starting restore process..."
     restore_credentials
+    print_status "Credentials restore step finished"
     restore_workflows
+    print_status "Workflows restore step finished"
     
     # Post-restore actions
     restart_n8n

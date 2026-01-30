@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -16,16 +17,28 @@
 
     <!-- Custom styles -->
     <style>
-        [x-cloak] { display: none !important; }
+        [x-cloak] {
+            display: none !important;
+        }
+
         .progress-line {
             animation: progress-shimmer 1.5s infinite;
         }
+
         @keyframes progress-shimmer {
-            0%, 100% { opacity: 0.5; }
-            50% { opacity: 1; }
+
+            0%,
+            100% {
+                opacity: 0.5;
+            }
+
+            50% {
+                opacity: 1;
+            }
         }
     </style>
 </head>
+
 <body class="bg-gray-50 min-h-screen">
     <!-- Navigation -->
     <nav class="bg-white shadow-lg">
@@ -34,21 +47,30 @@
                 <div class="flex">
                     <div class="flex-shrink-0 flex items-center">
                         <svg class="h-8 w-8 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" />
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" />
                         </svg>
                         <span class="ml-2 text-xl font-bold text-gray-900">N8N Backup Utility</span>
                     </div>
                     <div class="hidden sm:ml-6 sm:flex sm:space-x-8">
-                        <a href="/" class="{% block nav_dashboard %}border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700{% endblock %} inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium">
+                        <a href="/"
+                            class="{% block nav_dashboard %}border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700{% endblock %} inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium">
                             Dashboard
                         </a>
-                        <a href="/backup" class="{% block nav_backup %}border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700{% endblock %} inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium">
+                        <a href="/backup"
+                            class="{% block nav_backup %}border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700{% endblock %} inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium">
                             Backups
                         </a>
-                        <a href="/restore" class="{% block nav_restore %}border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700{% endblock %} inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium">
+                        <a href="/restore"
+                            class="{% block nav_restore %}border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700{% endblock %} inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium">
                             Restore
                         </a>
-                        <a href="/config" class="{% block nav_config %}border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700{% endblock %} inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium">
+                        <a href="/hosts"
+                            class="{% block nav_hosts %}border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700{% endblock %} inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium">
+                            Remote Hosts
+                        </a>
+                        <a href="/config"
+                            class="{% block nav_config %}border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700{% endblock %} inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium">
                             Configuration
                         </a>
                     </div>
@@ -63,11 +85,13 @@
     </main>
 
     <!-- Toast Notifications -->
-    <div id="toast-container" class="fixed top-4 right-4 z-50 space-y-2"></div>
+    <div id="toast-container" class="fixed top-4 right-4 z-50 flex flex-col items-end space-y-2 pointer-events-none"
+        style="max-width: calc(100% - 2rem);"></div>
 
     <!-- Custom JavaScript -->
     <script src="/static/js/app.js"></script>
 
     {% block extra_js %}{% endblock %}
 </body>
+
 </html>

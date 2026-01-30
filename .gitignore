@@ -1,0 +1,32 @@
+# n8n-manager gitignore
+
+# Sensitive configuration
+config/.remote_secrets
+config/.encryption_key
+config/remote_hosts.json
+config/n8n_config.json
+
+# Backup data
+backups/
+
+# Python artifacts
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+env/
+venv/
+
+# Database
+*.sqlite
+*.db
+
+# OS specific
+.DS_Store
+Thumbs.db
+
+# Misc
+.env
+.claude/
+.gemini/

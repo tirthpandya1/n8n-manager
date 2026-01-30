@@ -22,11 +22,33 @@ for /f "tokens=1-6 delims=/:. " %%a in ("%date% %time%") do (
 set "TIMESTAMP=%TIMESTAMP: =0%"
 
 REM Parse arguments
+set "NON_INTERACTIVE=false"
+
+:parse_args
+if "%~1"=="" goto args_done
+if "%~1"=="--non-interactive" (
+    set "NON_INTERACTIVE=true"
+    shift
+    goto :parse_args
+)
 if "%~1"=="docker" (
     set "INSTANCE_TYPE=docker"
-    if not "%~2"=="" set "CONTAINER_NAME=%~2"
+    if not "%~2"=="" (
+        set "CONTAINER_NAME=%~2"
+        shift
+    )
+    shift
+    goto :parse_args
 )
-if "%~1"=="native" set "INSTANCE_TYPE=native"
+if "%~1"=="native" (
+    set "INSTANCE_TYPE=native"
+    shift
+    goto :parse_args
+)
+shift
+goto :parse_args
+
+:args_done
 
 echo Starting N8N Backup...
 echo Instance type: %INSTANCE_TYPE%
@@ -60,54 +82,58 @@ if "%INSTANCE_TYPE%"=="native" (
 
     REM If no container name specified, show selector
     if "%CONTAINER_NAME%"=="n8n" (
-        echo Looking for n8n containers...
-        echo.
-
-        REM Get all containers with 'n8n' in the name
-        set "COUNTER=0"
-        for /f "delims=" %%c in ('docker ps -a --format "{{.Names}}" ^| findstr /i "n8n"') do (
-            set /a COUNTER+=1
-            set "CONTAINER_!COUNTER!=%%c"
-            echo [!COUNTER!] %%c
-        )
-
-        if !COUNTER!==0 (
-            echo ERROR: No containers with 'n8n' in the name found.
-            echo.
-            echo All available containers:
-            docker ps -a --format "{{.Names}}"
-            exit /b 1
-        )
-
-        if !COUNTER!==1 (
-            set "CONTAINER_NAME=!CONTAINER_1!"
-            echo.
-            echo Only one n8n container found: !CONTAINER_NAME!
-            echo Using this container...
+        if "%NON_INTERACTIVE%"=="true" (
+            echo Using default container name 'n8n' in non-interactive mode.
         ) else (
+            echo Looking for n8n containers...
             echo.
-            set /p "SELECTION=Select container number (1-!COUNTER!): "
 
-            if not defined SELECTION (
-                echo ERROR: No selection made.
+            REM Get all containers with 'n8n' in the name
+            set "COUNTER=0"
+            for /f "delims=" %%c in ('docker ps -a --format "{{.Names}}" ^| findstr /i "n8n"') do (
+                set /a COUNTER+=1
+                set "CONTAINER_!COUNTER!=%%c"
+                echo [!COUNTER!] %%c
+            )
+
+            if !COUNTER!==0 (
+                echo ERROR: No containers with 'n8n' in the name found.
+                echo.
+                echo All available containers:
+                docker ps -a --format "{{.Names}}"
                 exit /b 1
             )
 
-            if !SELECTION! lss 1 (
-                echo ERROR: Invalid selection.
-                exit /b 1
-            )
+            if !COUNTER!==1 (
+                set "CONTAINER_NAME=!CONTAINER_1!"
+                echo.
+                echo Only one n8n container found: !CONTAINER_NAME!
+                echo Using this container...
+            ) else (
+                echo.
+                set /p "SELECTION=Select container number (1-!COUNTER!): "
 
-            if !SELECTION! gtr !COUNTER! (
-                echo ERROR: Invalid selection.
-                exit /b 1
-            )
+                if not defined SELECTION (
+                    echo ERROR: No selection made.
+                    exit /b 1
+                )
 
-            set "CONTAINER_NAME=!CONTAINER_%SELECTION%!"
+                if !SELECTION! lss 1 (
+                    echo ERROR: Invalid selection.
+                    exit /b 1
+                )
+
+                if !SELECTION! gtr !COUNTER! (
+                    echo ERROR: Invalid selection.
+                    exit /b 1
+                )
+
+                set "CONTAINER_NAME=!CONTAINER_%SELECTION%!"
+                echo.
+                echo Selected: !CONTAINER_NAME!
+            )
             echo.
-            echo Selected: !CONTAINER_NAME!
         )
-        echo.
     )
 
     REM Verify selected container exists
@@ -134,6 +160,9 @@ echo Exporting workflows...
 if "%INSTANCE_TYPE%"=="native" (
     %N8N_CMD% export:workflow --all --separate --output="%WORKFLOWS_DIR%"
 ) else (
+    REM Ensure clean state in container
+    docker exec -u node %CONTAINER_NAME% rm -rf /tmp/workflows_export 2>nul
+    docker exec -u node %CONTAINER_NAME% mkdir -p /tmp/workflows_export
     docker exec -u node %CONTAINER_NAME% n8n export:workflow --all --separate --output=/tmp/workflows_export
     docker cp %CONTAINER_NAME%:/tmp/workflows_export/. "%WORKFLOWS_DIR%/"
     docker exec -u node %CONTAINER_NAME% rm -rf /tmp/workflows_export

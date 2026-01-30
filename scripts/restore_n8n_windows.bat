@@ -24,12 +24,23 @@ REM ============================================
 REM Parse Arguments
 REM ============================================
 
-if "%~1"=="" goto show_usage
+set "NON_INTERACTIVE=false"
+
+:parse_args
+if "%~1"=="" goto args_done
+if "%~1"=="--non-interactive" (
+    set "NON_INTERACTIVE=true"
+    shift
+    goto :parse_args
+)
 if /i "%~1"=="native" (
     set "INSTANCE_TYPE=native"
     if not "%~2"=="" (
         set "BACKUP_NAME=%~2"
+        shift
     )
+    shift
+    goto :parse_args
 )
 if /i "%~1"=="docker" (
     set "INSTANCE_TYPE=docker"
@@ -39,10 +50,17 @@ if /i "%~1"=="docker" (
     if not "%~3"=="" (
         set "CONTAINER_NAME=%~3"
     )
+    shift
+    goto :parse_args
 )
 if /i "%~1"=="-h" goto show_usage
 if /i "%~1"=="--help" goto show_usage
 if /i "%~1"=="/?" goto show_usage
+
+shift
+goto :parse_args
+
+:args_done
 
 if "%INSTANCE_TYPE%"=="" goto show_usage
 
@@ -51,6 +69,10 @@ REM Select Backup if not specified
 REM ============================================
 
 if "%BACKUP_NAME%"=="" (
+    if "%NON_INTERACTIVE%"=="true" (
+        echo ERROR: Backup name must be specified in non-interactive mode.
+        exit /b 1
+    )
     call :select_backup_interactive
     if errorlevel 1 exit /b 1
 )
@@ -73,6 +95,12 @@ if "%INSTANCE_TYPE%"=="native" (
 if errorlevel 1 exit /b 1
 
 REM ============================================
+REM Detect N8N Version
+REM ============================================
+
+call :detect_n8n_version_and_user
+
+REM ============================================
 REM Prepare Backup
 REM ============================================
 
@@ -87,11 +115,15 @@ echo.
 echo WARNING: This will import workflows and credentials to your n8n instance.
 echo WARNING: Existing workflows with the same names may be overwritten!
 echo.
-set /p "CONFIRM=Are you sure you want to continue? (y/N): "
+if "%NON_INTERACTIVE%"=="true" (
+    echo Proceeding with restore in non-interactive mode...
+) else (
+    set /p "CONFIRM=Are you sure you want to continue? (y/N): "
 
-if /i not "%CONFIRM%"=="y" (
-    echo Restore cancelled by user.
-    exit /b 0
+    if /i not "!CONFIRM!"=="y" (
+        echo Restore cancelled by user.
+        exit /b 0
+    )
 )
 
 echo.
@@ -246,78 +278,136 @@ REM ============================================
 :check_docker_container
 where docker >nul 2>&1
 if errorlevel 1 (
-    echo ERROR: Docker not found.
-    exit /b 1
+  echo ERROR: Docker not found.
+  exit /b 1
 )
 
 REM If default container name, show selector
 if "%CONTAINER_NAME%"=="n8n" (
+  if "%NON_INTERACTIVE%"=="true" (
+    echo Using default container name 'n8n' in non-interactive mode.
+  ) else (
     echo Looking for n8n containers...
     echo.
 
     set "COUNTER=0"
     for /f "delims=" %%c in ('docker ps -a --format "{{.Names}}" ^| findstr /i "n8n"') do (
-        set /a COUNTER+=1
-        set "CONTAINER_!COUNTER!=%%c"
-        echo [!COUNTER!] %%c
+      set /a COUNTER+=1
+      set "CONTAINER_!COUNTER!=%%c"
+      echo [!COUNTER!] %%c
     )
 
     if !COUNTER!==0 (
-        echo ERROR: No containers with 'n8n' in the name found.
-        echo.
-        echo All available containers:
-        docker ps -a --format "{{.Names}}"
-        exit /b 1
+      echo ERROR: No containers with 'n8n' in the name found.
+      echo.
+      echo All available containers:
+      docker ps -a --format "{{.Names}}"
+      exit /b 1
     )
 
     if !COUNTER!==1 (
-        set "CONTAINER_NAME=!CONTAINER_1!"
-        echo.
-        echo Only one n8n container found: !CONTAINER_NAME!
-        echo Using this container...
+      set "CONTAINER_NAME=!CONTAINER_1!"
+      echo.
+      echo Only one n8n container found: !CONTAINER_NAME!
+      echo Using this container...
     ) else (
-        echo.
-        set /p "SELECTION=Select container number (1-!COUNTER!): "
+      echo.
+      set "SELECTION="
+      set /p "SELECTION=Select container number (1-!COUNTER!): "
 
-        if not defined SELECTION (
-            echo ERROR: No selection made.
-            exit /b 1
-        )
+      if not defined SELECTION (
+        echo ERROR: No selection made.
+        exit /b 1
+      )
 
-        if !SELECTION! lss 1 (
-            echo ERROR: Invalid selection.
-            exit /b 1
-        )
+      if !SELECTION! lss 1 (
+        echo ERROR: Invalid selection.
+        exit /b 1
+      )
 
-        if !SELECTION! gtr !COUNTER! (
-            echo ERROR: Invalid selection.
-            exit /b 1
-        )
+      if !SELECTION! gtr !COUNTER! (
+        echo ERROR: Invalid selection.
+        exit /b 1
+      )
 
-        set "CONTAINER_NAME=!CONTAINER_%SELECTION%!"
-        echo.
-        echo Selected: !CONTAINER_NAME!
+      REM *** FIX START: Use CALL to force nested expansion ***
+      call set "CONTAINER_NAME=%%CONTAINER_!SELECTION!%%"
+      REM *** FIX END ***
+      
+      echo.
+      echo Selected: !CONTAINER_NAME!
     )
-    echo.
+  )
+  echo.
 )
 
 REM Verify container exists
 docker ps -a --format "{{.Names}}" | findstr "%CONTAINER_NAME%" >nul 2>&1
 if errorlevel 1 (
-    echo ERROR: Container '%CONTAINER_NAME%' not found.
-    exit /b 1
+  echo ERROR: Container '%CONTAINER_NAME%' not found.
+  exit /b 1
 )
 
 REM Check if container is running
 docker ps --format "{{.Names}}" | findstr "%CONTAINER_NAME%" >nul 2>&1
 if errorlevel 1 (
-    echo WARNING: Container '%CONTAINER_NAME%' exists but is not running.
-    echo Starting container...
-    docker start %CONTAINER_NAME%
-    timeout /t 3 /nobreak >nul
+  echo WARNING: Container '%CONTAINER_NAME%' exists but is not running.
+  echo Starting container...
+  docker start %CONTAINER_NAME%
+  timeout /t 3 /nobreak >nul
 )
 
 echo Docker container '%CONTAINER_NAME%' is ready
+goto :eof
+
+REM ============================================
+REM Function: Detect N8N Version and Get User ID
+REM ============================================
+
+:detect_n8n_version_and_user
+set "N8N_VERSION="
+set "N8N_MAJOR_VERSION="
+set "USER_ID="
+set "PROJECT_ID="
+
+REM Get n8n version
+if "%INSTANCE_TYPE%"=="docker" (
+    for /f "tokens=*" %%v in ('docker exec %CONTAINER_NAME% n8n --version 2^>nul') do set "N8N_VERSION=%%v"
+) else (
+    for /f "tokens=*" %%v in ('%N8N_CMD% --version 2^>nul') do set "N8N_VERSION=%%v"
+)
+
+if not defined N8N_VERSION (
+    echo WARNING: Could not detect n8n version
+    goto :eof
+)
+
+echo Detected n8n version: %N8N_VERSION%
+
+REM Extract major version (first digit before the dot)
+for /f "tokens=1 delims=." %%a in ("%N8N_VERSION%") do set "N8N_MAJOR_VERSION=%%a"
+
+REM Check if n8n v2 or higher (only if version was detected)
+if defined N8N_MAJOR_VERSION (
+    if %N8N_MAJOR_VERSION% GEQ 2 (
+        echo n8n v2+ detected - getting owner information for imports
+
+        REM Try to get owner credentials ID (owner credential is auto-created in v2)
+        REM This is more reliable than trying to get user/project IDs
+        if "%INSTANCE_TYPE%"=="docker" (
+            echo Note: n8n v2 requires owner authentication for CLI imports
+            echo Attempting import without explicit userId/projectId - n8n will auto-assign to owner
+            REM Don't set USER_ID or PROJECT_ID - let n8n handle it
+            REM The credentials import already worked, so the owner exists
+        ) else (
+            echo Note: n8n v2 requires owner authentication for CLI imports
+            echo Attempting import without explicit userId/projectId - n8n will auto-assign to owner
+        )
+    ) else (
+        echo n8n v1 detected - userId parameter not needed
+    )
+)
+
 goto :eof
 
 REM ============================================
@@ -325,10 +415,21 @@ REM Function: Prepare Backup
 REM ============================================
 
 :prepare_backup
-set "COMPRESSED_BACKUP=%BACKUP_BASE_DIR%\%BACKUP_NAME%.tar.gz"
-set "ZIP_BACKUP=%BACKUP_BASE_DIR%\%BACKUP_NAME%.zip"
-set "DIRECTORY_BACKUP=%BACKUP_BASE_DIR%\%BACKUP_NAME%"
+REM Strip extensions from BACKUP_NAME if present
+set "TEMP_NAME=%BACKUP_NAME%"
+if "%TEMP_NAME:~-7%"==".tar.gz" set "TEMP_NAME=%TEMP_NAME:~0,-7%"
+if "%TEMP_NAME:~-4%"==".zip" set "TEMP_NAME=%TEMP_NAME:~0,-4%"
+set "CLEAN_BACKUP_NAME=%TEMP_NAME%"
+
+set "COMPRESSED_BACKUP=%BACKUP_BASE_DIR%\%CLEAN_BACKUP_NAME%.tar.gz"
+set "ZIP_BACKUP=%BACKUP_BASE_DIR%\%CLEAN_BACKUP_NAME%.zip"
+set "DIRECTORY_BACKUP=%BACKUP_BASE_DIR%\%CLEAN_BACKUP_NAME%"
 set "BACKUP_DIR="
+
+echo [DEBUG] Checking for:
+echo   !COMPRESSED_BACKUP!
+echo   !ZIP_BACKUP!
+echo   !DIRECTORY_BACKUP!
 
 REM Check for compressed backup
 if exist "%COMPRESSED_BACKUP%" (
@@ -341,7 +442,7 @@ if exist "%COMPRESSED_BACKUP%" (
     where tar >nul 2>&1
     if !errorlevel!==0 (
         tar -xzf "%COMPRESSED_BACKUP%" -C "!TEMP_EXTRACT_DIR!"
-        set "BACKUP_DIR=!TEMP_EXTRACT_DIR!\%BACKUP_NAME%"
+        set "BACKUP_DIR=!TEMP_EXTRACT_DIR!\%CLEAN_BACKUP_NAME%"
     ) else (
         echo ERROR: tar command not found. Cannot extract .tar.gz files.
         exit /b 1
@@ -360,7 +461,7 @@ if exist "%ZIP_BACKUP%" (
 
     powershell -Command "Expand-Archive -Path '%ZIP_BACKUP%' -DestinationPath '!TEMP_EXTRACT_DIR!'" >nul 2>&1
     if !errorlevel!==0 (
-        set "BACKUP_DIR=!TEMP_EXTRACT_DIR!\%BACKUP_NAME%"
+        set "BACKUP_DIR=!TEMP_EXTRACT_DIR!\%CLEAN_BACKUP_NAME%"
     ) else (
         echo ERROR: Failed to extract zip backup.
         exit /b 1
@@ -405,20 +506,22 @@ echo Importing credentials...
 if "%INSTANCE_TYPE%"=="native" (
     %N8N_CMD% import:credentials --input="%CREDENTIALS_FILE%"
     if errorlevel 1 (
-        echo WARNING: Failed to import credentials
+        echo [WARNING] Failed to import credentials
+        echo TIP: If you see 'Project' matching errors, ensure you have created an owner user in the n8n UI first.
     ) else (
-        echo Credentials imported successfully
+        echo [SUCCESS] Credentials imported successfully
     )
 ) else (
     docker cp "%CREDENTIALS_FILE%" %CONTAINER_NAME%:/tmp/credentials_import.json
     docker exec -u node %CONTAINER_NAME% n8n import:credentials --input=/tmp/credentials_import.json
 
     if errorlevel 1 (
-        echo WARNING: Failed to import credentials
+        echo [WARNING] Failed to import credentials (exit code: %ERRORLEVEL%)
+        echo TIP: If you see 'Project' matching errors, ensure you have created an owner user in the n8n UI first.
         REM Try to cleanup anyway
         docker exec -u node %CONTAINER_NAME% rm -f /tmp/credentials_import.json 2>nul
     ) else (
-        echo Credentials imported successfully
+        echo [SUCCESS] Credentials imported successfully
         REM Cleanup (ignore errors)
         docker exec -u node %CONTAINER_NAME% rm -f /tmp/credentials_import.json 2>nul
     )
@@ -449,19 +552,72 @@ if %WORKFLOW_COUNT%==0 (
 echo Importing %WORKFLOW_COUNT% workflows...
 
 if "%INSTANCE_TYPE%"=="native" (
-    %N8N_CMD% import:workflow --separate --input="%WORKFLOWS_DIR%"
-    if errorlevel 1 (
-        echo ERROR: Failed to import workflows
-        exit /b 1
+    REM Build import command
+    if defined USER_ID (
+        echo Importing workflows for n8n v2 with User ID: %USER_ID%
+        set "SUCCESS_COUNT=0"
+        set "FAIL_COUNT=0"
+        for %%f in ("%WORKFLOWS_DIR%\*.json") do (
+            echo   Importing %%~nxf...
+            %N8N_CMD% import:workflow --input="%%f" --userId=%USER_ID% >nul 2>&1
+            if not errorlevel 1 (
+                set /a SUCCESS_COUNT+=1
+            ) else (
+                echo   WARNING: Failed to import %%~nxf
+                set /a FAIL_COUNT+=1
+            )
+        )
+        echo Import summary: !SUCCESS_COUNT! succeeded, !FAIL_COUNT! failed
+        if !FAIL_COUNT! equ 0 (
+            echo Workflows imported successfully
+        ) else (
+            echo WARNING: Some workflows failed to import.
+        )
     ) else (
-        echo Workflows imported successfully
+        %N8N_CMD% import:workflow --separate --input="%WORKFLOWS_DIR%"
+        if errorlevel 1 (
+            echo ERROR: Failed to import workflows
+            exit /b 1
+        ) else (
+            echo Workflows imported successfully
+        )
     )
 ) else (
     docker exec -u node %CONTAINER_NAME% mkdir -p /tmp/workflows_import
     docker cp "%WORKFLOWS_DIR%\." %CONTAINER_NAME%:/tmp/workflows_import/
-    docker exec -u node %CONTAINER_NAME% n8n import:workflow --separate --input=/tmp/workflows_import
 
-    if errorlevel 1 (
+    REM Build import command - handle n8n v2 with USER_ID
+    if defined USER_ID (
+        echo Importing workflows to Docker for n8n v2 with User ID: %USER_ID%
+        set "SUCCESS_COUNT=0"
+        set "FAIL_COUNT=0"
+        
+        REM Loop through files in container
+        for /f "tokens=*" %%f in ('docker exec -u node %CONTAINER_NAME% sh -c "ls /tmp/workflows_import/*.json"') do (
+            echo   Importing %%~nxf...
+            docker exec -u node %CONTAINER_NAME% n8n import:workflow --input="%%f" --userId=%USER_ID% >nul 2>&1
+            if not errorlevel 1 (
+                set /a SUCCESS_COUNT+=1
+            ) else (
+                echo   WARNING: Failed to import %%~nxf
+                set /a FAIL_COUNT+=1
+            )
+        )
+        echo Import summary: !SUCCESS_COUNT! succeeded, !FAIL_COUNT! failed
+        if !FAIL_COUNT! equ 0 (
+            set "IMPORT_STATUS=0"
+        ) else (
+            set "IMPORT_STATUS=1"
+        )
+    ) else (
+        if defined N8N_MAJOR_VERSION (
+            if %N8N_MAJOR_VERSION% GEQ 2 echo Importing workflows for n8n v2...
+        )
+        docker exec -u node %CONTAINER_NAME% n8n import:workflow --separate --input=/tmp/workflows_import
+        set "IMPORT_STATUS=%ERRORLEVEL%"
+    )
+
+    if "%IMPORT_STATUS%" NEQ "0" (
         echo ERROR: Failed to import workflows
         REM Try to cleanup anyway
         docker exec -u node %CONTAINER_NAME% rm -rf /tmp/workflows_import 2>nul

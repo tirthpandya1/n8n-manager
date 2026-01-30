@@ -15,7 +15,7 @@ function showToast(message, type = 'info', duration = 4000) {
 
     // Create toast element
     const toast = document.createElement('div');
-    toast.className = `transform transition-all duration-300 ease-in-out max-w-sm w-full bg-white shadow-lg rounded-lg pointer-events-auto overflow-hidden`;
+    toast.className = `transform transition-all duration-300 ease-in-out w-72 sm:w-80 bg-white shadow-lg rounded-lg pointer-events-auto overflow-hidden flex-shrink-0 border border-gray-100`;
 
     // Icon and color based on type
     const icons = {

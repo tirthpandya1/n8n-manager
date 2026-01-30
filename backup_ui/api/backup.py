@@ -23,6 +23,7 @@ class CreateBackupRequest(BaseModel):
     container_name: Optional[str] = None
     include_volumes: bool = False
     include_logs: bool = False
+    host_id: Optional[str] = None
 
 
 class RestoreBackupRequest(BaseModel):
@@ -30,6 +31,11 @@ class RestoreBackupRequest(BaseModel):
     restore_type: str = 'docker'  # 'native', 'docker', 'enhanced'
     container_name: Optional[str] = None
     recreate_container: bool = False
+    # n8n v2 API support
+    api_key: Optional[str] = None
+    n8n_url: str = 'http://localhost:5678'
+    # Remote host support (for future use)
+    host_id: Optional[str] = None
 
 
 @router.get("/list")
@@ -65,7 +71,8 @@ async def create_backup(request: CreateBackupRequest):
                 backup_type=request.backup_type,
                 container_name=request.container_name,
                 include_volumes=request.include_volumes,
-                include_logs=request.include_logs
+                include_logs=request.include_logs,
+                host_id=request.host_id
             ):
                 yield f"data: {json.dumps({'message': line})}\n\n"
         except Exception as e:
@@ -83,7 +90,10 @@ async def restore_backup(request: RestoreBackupRequest):
                 backup_name=request.backup_name,
                 restore_type=request.restore_type,
                 container_name=request.container_name,
-                recreate_container=request.recreate_container
+                recreate_container=request.recreate_container,
+                api_key=request.api_key,
+                n8n_url=request.n8n_url,
+                host_id=request.host_id
             ):
                 yield f"data: {json.dumps({'message': line})}\n\n"
         except Exception as e:
@@ -140,5 +150,15 @@ async def get_storage_usage():
     try:
         usage = backup_service.get_storage_usage()
         return {"success": True, "storage": usage}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/version/{container_name}")
+async def detect_n8n_version(container_name: str = "n8n"):
+    """Detect n8n version for a container"""
+    try:
+        version_info = backup_service.detect_n8n_version(container_name)
+        return version_info
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

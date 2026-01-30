@@ -16,7 +16,7 @@ NC='\033[0m' # No Color
 # Get script directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 N8N_DIR="$(dirname "$SCRIPT_DIR")"
-BACKUP_BASE_DIR="$N8N_DIR/backups"
+BACKUP_BASE_DIR="${N8N_BACKUP_DIR:-$N8N_DIR/backups}"
 
 # Default values
 CONTAINER_NAME="n8n"

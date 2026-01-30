@@ -1,8 +1,8 @@
 @echo off
 setlocal enabledelayedexpansion
 
-REM N8N Restore Script for Windows
-REM Usage: restore_n8n_windows.bat [native|docker] [backup_name] [container_name]
+REM N8N Restore Script for Windows with v2 API Support
+REM Usage: restore_n8n_windows_v2.bat [native|docker] [backup_name] [container_name] [--api-key KEY]
 
 REM Get script directory
 set "SCRIPT_DIR=%~dp0"
@@ -16,48 +16,63 @@ set "INSTANCE_TYPE="
 set "CONTAINER_NAME=n8n"
 set "BACKUP_NAME="
 set "TEMP_EXTRACT_DIR="
+set "API_KEY="
+set "N8N_URL=http://localhost:5678"
 
-echo Starting N8N Restore...
+echo ================================================================
+echo N8N Restore Utility (v2 API Support)
+echo ================================================================
 echo.
 
 REM ============================================
 REM Parse Arguments
 REM ============================================
 
-set "NON_INTERACTIVE=false"
-
 :parse_args
 if "%~1"=="" goto args_done
-if "%~1"=="--non-interactive" (
-    set "NON_INTERACTIVE=true"
-    shift
-    goto :parse_args
-)
 if /i "%~1"=="native" (
     set "INSTANCE_TYPE=native"
-    if not "%~2"=="" (
-        set "BACKUP_NAME=%~2"
-    )
     shift
-    goto :parse_args
+    goto parse_args
 )
 if /i "%~1"=="docker" (
     set "INSTANCE_TYPE=docker"
-    if not "%~2"=="" (
-        set "BACKUP_NAME=%~2"
-    )
-    if not "%~3"=="" (
-        set "CONTAINER_NAME=%~3"
-    )
     shift
-    goto :parse_args
+    goto parse_args
+)
+if /i "%~1"=="--non-interactive" (
+    set "NON_INTERACTIVE=true"
+    shift
+    goto parse_args
+)
+if /i "%~1"=="--api-key" (
+    set "API_KEY=%~2"
+    shift
+    shift
+    goto parse_args
+)
+if /i "%~1"=="--url" (
+    set "N8N_URL=%~2"
+    shift
+    shift
+    goto parse_args
 )
 if /i "%~1"=="-h" goto show_usage
 if /i "%~1"=="--help" goto show_usage
 if /i "%~1"=="/?" goto show_usage
-
+REM If not a flag, assume it's backup_name or container_name
+if not defined BACKUP_NAME (
+    set "BACKUP_NAME=%~1"
+    shift
+    goto parse_args
+)
+if not defined CONTAINER_NAME (
+    set "CONTAINER_NAME=%~1"
+    shift
+    goto parse_args
+)
 shift
-goto :parse_args
+goto parse_args
 
 :args_done
 
@@ -85,29 +100,69 @@ REM ============================================
 REM Check Prerequisites
 REM ============================================
 
-if "%INSTANCE_TYPE%"=="native" (
-    call :check_native_n8n
-) else (
+if "%INSTANCE_TYPE%"=="docker" (
     call :check_docker_container
+    if errorlevel 1 exit /b 1
+) else (
+    call :check_native_n8n
+    if errorlevel 1 exit /b 1
 )
-
-if errorlevel 1 exit /b 1
 
 REM ============================================
 REM Detect N8N Version
 REM ============================================
 
-call :detect_n8n_version_and_user
+call :detect_n8n_version
 
 REM ============================================
-REM Prepare Backup
+REM V2 API Key Prompt
+REM ============================================
+
+if defined N8N_IS_V2 (
+    if not defined API_KEY (
+        if "%NON_INTERACTIVE%"=="true" (
+            echo n8n v2 detected. No API key provided, falling back to CLI restore...
+        ) else (
+            echo.
+            echo ================================================================
+            echo n8n v2 DETECTED
+            echo ================================================================
+            echo.
+            echo For n8n v2, API-based restore is STRONGLY RECOMMENDED.
+            echo.
+            echo To use API restore, you need an API key:
+            echo 1. Open http://localhost:5678 in your browser
+            echo 2. Go to Settings ^> API
+            echo 3. Create an API key
+            echo 4. Copy the key
+            echo.
+            set /p "API_KEY=Enter API Key (or press Enter to use CLI restore): "
+            echo.
+        )
+    )
+
+    if defined API_KEY (
+        echo Using API-based restore for n8n v2...
+        call :restore_via_api
+        goto :cleanup_and_exit
+    ) else (
+        if not "%NON_INTERACTIVE%"=="true" (
+            echo WARNING: CLI restore may have issues with n8n v2
+            echo Press Ctrl+C to cancel, or
+            pause
+        )
+    )
+)
+
+REM ============================================
+REM Prepare Backup (for CLI restore)
 REM ============================================
 
 call :prepare_backup
 if errorlevel 1 exit /b 1
 
 REM ============================================
-REM Show Confirmation
+REM CLI-Based Restore
 REM ============================================
 
 echo.
@@ -121,22 +176,19 @@ if "%NON_INTERACTIVE%"=="true" (
 
     if /i not "!CONFIRM!"=="y" (
         echo Restore cancelled by user.
-        exit /b 0
+        goto :cleanup_and_exit
     )
 )
 
 echo.
-
-REM ============================================
-REM Perform Restore
-REM ============================================
-
 call :restore_credentials
 call :restore_workflows
 
 REM ============================================
-REM Cleanup and Finish
+REM Cleanup and Exit
 REM ============================================
+
+:cleanup_and_exit
 
 if defined TEMP_EXTRACT_DIR (
     if exist "%TEMP_EXTRACT_DIR%" (
@@ -146,10 +198,12 @@ if defined TEMP_EXTRACT_DIR (
 )
 
 echo.
-echo Restore completed successfully!
+echo ================================================================
+echo Restore Process Completed
+echo ================================================================
 echo.
 echo Next steps:
-echo 1. Open your n8n interface
+echo 1. Open your n8n interface at %N8N_URL%
 echo 2. Verify that workflows are present and functional
 echo 3. Test credentials by running a workflow
 echo 4. Activate workflows as needed
@@ -169,22 +223,110 @@ REM Function: Show Usage
 REM ============================================
 
 :show_usage
-echo Usage: %~nx0 [native^|docker] [backup_name] [container_name]
+echo Usage: %~nx0 [native^|docker] [backup_name] [container_name] [options]
+echo.
+echo Arguments:
+echo   native/docker       Type of n8n installation
+echo   backup_name         Name of backup to restore (optional - will show selector)
+echo   container_name      Docker container name (default: n8n)
 echo.
 echo Options:
-echo   native              Restore to native n8n installation
-echo   docker              Restore to Docker n8n container
-echo   backup_name         Name of backup to restore (optional - will show selector)
-echo   container_name      Name of Docker container (optional - will show selector)
+echo   --api-key KEY       n8n API key for v2 restore
+echo   --url URL           n8n URL (default: http://localhost:5678)
 echo.
 echo Examples:
-echo   %~nx0 native
 echo   %~nx0 docker
-echo   %~nx0 native native_backup_20240115_143022
 echo   %~nx0 docker docker_backup_20240115_143022
-echo   %~nx0 docker docker_backup_20240115_143022 my-n8n
+echo   %~nx0 docker docker_backup_20240115_143022 --api-key your_key_here
 echo.
 exit /b 0
+
+REM ============================================
+REM Function: Detect N8N Version
+REM ============================================
+
+:detect_n8n_version
+set "N8N_VERSION="
+set "N8N_MAJOR_VERSION="
+set "N8N_IS_V2="
+
+if "%INSTANCE_TYPE%"=="docker" (
+    for /f "tokens=*" %%v in ('docker exec %CONTAINER_NAME% n8n --version 2^>nul') do set "N8N_VERSION=%%v"
+) else (
+    for /f "tokens=*" %%v in ('n8n --version 2^>nul') do set "N8N_VERSION=%%v"
+)
+
+if not defined N8N_VERSION (
+    echo WARNING: Could not detect n8n version
+    goto :eof
+)
+
+echo Detected n8n version: %N8N_VERSION%
+
+REM Extract major version
+for /f "tokens=1 delims=." %%a in ("%N8N_VERSION%") do set "N8N_MAJOR_VERSION=%%a"
+
+if defined N8N_MAJOR_VERSION (
+    if %N8N_MAJOR_VERSION% GEQ 2 (
+        set "N8N_IS_V2=true"
+        echo Status: n8n v2+ detected
+    ) else (
+        echo Status: n8n v1 detected
+    )
+)
+
+goto :eof
+
+REM ============================================
+REM Function: Restore via API
+REM ============================================
+
+:restore_via_api
+echo.
+echo ================================================================
+echo API-Based Restore (n8n v2)
+echo ================================================================
+echo.
+
+REM Prepare backup directory
+call :prepare_backup
+if errorlevel 1 exit /b 1
+
+REM Check if Python is available
+python --version >nul 2>&1
+if errorlevel 1 (
+    echo ERROR: Python is not installed or not in PATH
+    echo Please install Python 3 or use CLI restore
+    exit /b 1
+)
+
+REM Fix workflows using credential mapper
+echo Step 1: Fixing workflow credentials...
+python "%SCRIPT_DIR%\fix_workflow_credentials.py" "%BACKUP_DIR%\credentials.json" "%BACKUP_DIR%\credentials.json" "%BACKUP_DIR%\workflows" "%BACKUP_DIR%\workflows_fixed"
+
+if errorlevel 1 (
+    echo WARNING: Credential fix failed, using original workflows
+    set "WORKFLOWS_DIR=%BACKUP_DIR%\workflows"
+) else (
+    set "WORKFLOWS_DIR=%BACKUP_DIR%\workflows_fixed"
+)
+
+REM Import via API
+echo.
+echo Step 2: Importing workflows via API...
+python "%SCRIPT_DIR%\bulk_import_api.py" "%WORKFLOWS_DIR%" "%API_KEY%" "%N8N_URL%"
+
+if errorlevel 1 (
+    echo ERROR: API import failed
+    exit /b 1
+)
+
+echo.
+echo ================================================================
+echo API Restore Completed Successfully!
+echo ================================================================
+
+goto :eof
 
 REM ============================================
 REM Function: Select Backup Interactively
@@ -204,7 +346,7 @@ for %%f in ("%BACKUP_BASE_DIR%\*.tar.gz") do (
         REM Remove .tar.gz extension (remove last 7 characters)
         set "BASENAME=!FILENAME:~0,-7!"
         set "BACKUP_!COUNTER!=!BASENAME!"
-        echo [!COUNTER!] !BASENAME! ^(tar.gz^)
+        echo [!COUNTER!] !BASENAME! (tar.gz)
     )
 )
 
@@ -214,7 +356,7 @@ for %%f in ("%BACKUP_BASE_DIR%\*.zip") do (
         set /a COUNTER+=1
         set "BASENAME=%%~nf"
         set "BACKUP_!COUNTER!=!BASENAME!"
-        echo [!COUNTER!] !BASENAME! ^(zip^)
+        echo [!COUNTER!] !BASENAME! (zip)
     )
 )
 
@@ -223,7 +365,7 @@ for /d %%d in ("%BACKUP_BASE_DIR%\*_backup_*") do (
     set /a COUNTER+=1
     set "BASENAME=%%~nxd"
     set "BACKUP_!COUNTER!=!BASENAME!"
-    echo [!COUNTER!] !BASENAME! ^(directory^)
+    echo [!COUNTER!] !BASENAME! (directory)
 )
 
 if %COUNTER%==0 (
@@ -257,6 +399,34 @@ echo.
 goto :eof
 
 REM ============================================
+REM Function: Check Docker Container
+REM ============================================
+
+:check_docker_container
+where docker >nul 2>&1
+if errorlevel 1 (
+    echo ERROR: Docker not found.
+    exit /b 1
+)
+
+docker ps -a --format "{{.Names}}" | findstr /x "%CONTAINER_NAME%" >nul 2>&1
+if errorlevel 1 (
+    echo ERROR: Container '%CONTAINER_NAME%' not found.
+    exit /b 1
+)
+
+docker ps --format "{{.Names}}" | findstr /x "%CONTAINER_NAME%" >nul 2>&1
+if errorlevel 1 (
+    echo WARNING: Container '%CONTAINER_NAME%' exists but is not running.
+    echo Starting container...
+    docker start %CONTAINER_NAME%
+    timeout /t 3 /nobreak >nul
+)
+
+echo Docker container '%CONTAINER_NAME%' is ready
+goto :eof
+
+REM ============================================
 REM Function: Check Native N8N
 REM ============================================
 
@@ -266,140 +436,7 @@ if errorlevel 1 (
     echo ERROR: n8n command not found. Please install n8n globally.
     exit /b 1
 )
-set "N8N_CMD=n8n"
 echo Native n8n installation found
-goto :eof
-
-REM ============================================
-REM Function: Check Docker Container
-REM ============================================
-
-:check_docker_container
-where docker >nul 2>&1
-if errorlevel 1 (
-  echo ERROR: Docker not found.
-  exit /b 1
-)
-
-REM If default container name, show selector
-if "%CONTAINER_NAME%"=="n8n" (
-  if "%NON_INTERACTIVE%"=="true" (
-    echo Using default container name 'n8n' in non-interactive mode.
-  ) else (
-    echo Looking for n8n containers...
-    echo.
-
-    set "COUNTER=0"
-    REM Use 'docker ps -a' to find all containers and filter by name
-    for /f "delims=" %%c in ('docker ps -a --format "{{.Names}}" ^| findstr /i "n8n"') do (
-      set /a COUNTER+=1
-      set "CONTAINER_!COUNTER!=%%c"
-      echo [!COUNTER!] %%c
-    )
-
-    if !COUNTER!==0 (
-      echo ERROR: No containers with 'n8n' in the name found.
-      echo.
-      echo All available containers:
-      docker ps -a --format "{{.Names}}"
-      exit /b 1
-    )
-
-    if !COUNTER!==1 (
-      set "CONTAINER_NAME=!CONTAINER_1!"
-      echo.
-      echo Only one n8n container found: !CONTAINER_NAME!
-      echo Using this container...
-    ) else (
-      echo.
-      set "SELECTION="
-      set /p "SELECTION=Select container number (1-!COUNTER!): "
-
-      if not defined SELECTION (
-        echo ERROR: No selection made.
-        exit /b 1
-      )
-
-      if !SELECTION! lss 1 (
-        echo ERROR: Invalid selection.
-        exit /b 1
-      )
-
-      if !SELECTION! gtr !COUNTER! (
-        echo ERROR: Invalid selection.
-        exit /b 1
-      )
-
-      REM Assign the selected name to the CONTAINER_NAME variable
-      call set "CONTAINER_NAME=%%CONTAINER_!SELECTION!%%"
-      echo.
-      echo Selected: !CONTAINER_NAME!
-    )
-  )
-  echo.
-)
-
-REM Verify container exists
-docker ps -a --format "{{.Names}}" | findstr "%CONTAINER_NAME%" >nul 2>&1
-if errorlevel 1 (
-  echo ERROR: Container '%CONTAINER_NAME%' not found.
-  exit /b 1
-)
-
-REM Check if container is running
-docker ps --format "{{.Names}}" | findstr "%CONTAINER_NAME%" >nul 2>&1
-if errorlevel 1 (
-  echo WARNING: Container '%CONTAINER_NAME%' exists but is not running.
-  echo Starting container...
-  docker start %CONTAINER_NAME%
-  timeout /t 3 /nobreak >nul
-)
-
-echo Docker container '%CONTAINER_NAME%' is ready
-goto :eof
-
-REM ============================================
-REM Function: Detect N8N Version and Get User ID
-REM ============================================
-
-:detect_n8n_version_and_user
-set "N8N_VERSION="
-set "N8N_MAJOR_VERSION="
-set "USER_ID="
-
-REM Get n8n version
-if "%INSTANCE_TYPE%"=="docker" (
-    for /f "tokens=*" %%v in ('docker exec %CONTAINER_NAME% n8n --version 2^>nul') do set "N8N_VERSION=%%v"
-) else (
-    for /f "tokens=*" %%v in ('%N8N_CMD% --version 2^>nul') do set "N8N_VERSION=%%v"
-)
-
-if not defined N8N_VERSION (
-    echo WARNING: Could not detect n8n version
-    goto :eof
-)
-
-echo Detected n8n version: %N8N_VERSION%
-
-REM Extract major version (first digit before the dot)
-for /f "tokens=1 delims=." %%a in ("%N8N_VERSION%") do set "N8N_MAJOR_VERSION=%%a"
-
-REM Check if n8n v2 or higher (only if version was detected)
-if defined N8N_MAJOR_VERSION (
-    if %N8N_MAJOR_VERSION% GEQ 2 (
-        echo n8n v2+ detected - will use userId parameter for imports
-
-        REM Try to get actual user ID from API (requires API setup)
-        REM For now, use a default UUID that n8n v2 accepts
-        REM This will assign workflows to the first/default user
-        set "USER_ID=00000000-0000-0000-0000-000000000000"
-
-        echo Using default user ID for workflow import: %USER_ID%
-    ) else (
-        echo n8n v1 detected - userId parameter not needed
-    )
-)
-
 goto :eof
 
 REM ============================================
@@ -407,9 +444,15 @@ REM Function: Prepare Backup
 REM ============================================
 
 :prepare_backup
-set "COMPRESSED_BACKUP=%BACKUP_BASE_DIR%\%BACKUP_NAME%.tar.gz"
-set "ZIP_BACKUP=%BACKUP_BASE_DIR%\%BACKUP_NAME%.zip"
-set "DIRECTORY_BACKUP=%BACKUP_BASE_DIR%\%BACKUP_NAME%"
+REM Strip extensions from BACKUP_NAME if present
+set "TEMP_NAME=%BACKUP_NAME%"
+if "%TEMP_NAME:~-7%"==".tar.gz" set "TEMP_NAME=%TEMP_NAME:~0,-7%"
+if "%TEMP_NAME:~-4%"==".zip" set "TEMP_NAME=%TEMP_NAME:~0,-4%"
+set "CLEAN_BACKUP_NAME=%TEMP_NAME%"
+
+set "COMPRESSED_BACKUP=%BACKUP_BASE_DIR%\%CLEAN_BACKUP_NAME%.tar.gz"
+set "ZIP_BACKUP=%BACKUP_BASE_DIR%\%CLEAN_BACKUP_NAME%.zip"
+set "DIRECTORY_BACKUP=%BACKUP_BASE_DIR%\%CLEAN_BACKUP_NAME%"
 set "BACKUP_DIR="
 
 REM Check for compressed backup
@@ -423,7 +466,7 @@ if exist "%COMPRESSED_BACKUP%" (
     where tar >nul 2>&1
     if !errorlevel!==0 (
         tar -xzf "%COMPRESSED_BACKUP%" -C "!TEMP_EXTRACT_DIR!"
-        set "BACKUP_DIR=!TEMP_EXTRACT_DIR!\%BACKUP_NAME%"
+        set "BACKUP_DIR=!TEMP_EXTRACT_DIR!\%CLEAN_BACKUP_NAME%"
     ) else (
         echo ERROR: tar command not found. Cannot extract .tar.gz files.
         exit /b 1
@@ -442,7 +485,7 @@ if exist "%ZIP_BACKUP%" (
 
     powershell -Command "Expand-Archive -Path '%ZIP_BACKUP%' -DestinationPath '!TEMP_EXTRACT_DIR!'" >nul 2>&1
     if !errorlevel!==0 (
-        set "BACKUP_DIR=!TEMP_EXTRACT_DIR!\%BACKUP_NAME%"
+        set "BACKUP_DIR=!TEMP_EXTRACT_DIR!\%CLEAN_BACKUP_NAME%"
     ) else (
         echo ERROR: Failed to extract zip backup.
         exit /b 1
@@ -471,7 +514,7 @@ echo Backup prepared successfully
 goto :eof
 
 REM ============================================
-REM Function: Restore Credentials
+REM Function: Restore Credentials (CLI)
 REM ============================================
 
 :restore_credentials
@@ -484,32 +527,29 @@ if not exist "%CREDENTIALS_FILE%" (
 
 echo Importing credentials...
 
-if "%INSTANCE_TYPE%"=="native" (
-    %N8N_CMD% import:credentials --input="%CREDENTIALS_FILE%"
-    if errorlevel 1 (
-        echo WARNING: Failed to import credentials
-    ) else (
-        echo Credentials imported successfully
-    )
-) else (
+if "%INSTANCE_TYPE%"=="docker" (
     docker cp "%CREDENTIALS_FILE%" %CONTAINER_NAME%:/tmp/credentials_import.json
     docker exec -u node %CONTAINER_NAME% n8n import:credentials --input=/tmp/credentials_import.json
 
     if errorlevel 1 (
         echo WARNING: Failed to import credentials
-        REM Try to cleanup anyway
-        docker exec -u node %CONTAINER_NAME% rm -f /tmp/credentials_import.json 2>nul
     ) else (
         echo Credentials imported successfully
-        REM Cleanup (ignore errors)
-        docker exec -u node %CONTAINER_NAME% rm -f /tmp/credentials_import.json 2>nul
+    )
+    docker exec -u node %CONTAINER_NAME% rm -f /tmp/credentials_import.json 2>nul
+) else (
+    n8n import:credentials --input="%CREDENTIALS_FILE%"
+    if errorlevel 1 (
+        echo WARNING: Failed to import credentials
+    ) else (
+        echo Credentials imported successfully
     )
 )
 
 goto :eof
 
 REM ============================================
-REM Function: Restore Workflows
+REM Function: Restore Workflows (CLI)
 REM ============================================
 
 :restore_workflows
@@ -530,59 +570,23 @@ if %WORKFLOW_COUNT%==0 (
 
 echo Importing %WORKFLOW_COUNT% workflows...
 
-if "%INSTANCE_TYPE%"=="native" (
-    REM Build import command with userId if needed (n8n v2+)
-    if defined USER_ID (
-        %N8N_CMD% import:workflow --separate --input="%WORKFLOWS_DIR%" --userId=%USER_ID%
-    ) else (
-        %N8N_CMD% import:workflow --separate --input="%WORKFLOWS_DIR%"
-    )
-
-    if errorlevel 1 (
-        echo ERROR: Failed to import workflows
-        exit /b 1
-    ) else (
-        echo Workflows imported successfully
-    )
-) else (
+if "%INSTANCE_TYPE%"=="docker" (
     docker exec -u node %CONTAINER_NAME% mkdir -p /tmp/workflows_import
     docker cp "%WORKFLOWS_DIR%\." %CONTAINER_NAME%:/tmp/workflows_import/
-
-    REM Build import command - for n8n v2, try import without ID flags first (may auto-assign)
-    if defined N8N_MAJOR_VERSION (
-        if %N8N_MAJOR_VERSION% GEQ 2 (
-            echo Importing workflows for n8n v2...
-            echo Trying import - n8n may auto-assign to owner...
-            docker exec -u node %CONTAINER_NAME% n8n import:workflow --separate --input=/tmp/workflows_import
-
-            if errorlevel 1 (
-                echo.
-                echo ERROR: n8n v2 import failed.
-                echo.
-                echo SOLUTION: Import via n8n UI instead:
-                echo 1. Open your n8n interface
-                echo 2. Go to Workflows -^> Import from File
-                echo 3. Import from: %BACKUP_DIR%\workflows\
-                echo.
-                echo The UI will automatically assign workflows to your user.
-                echo.
-            )
-        ) else (
-            docker exec -u node %CONTAINER_NAME% n8n import:workflow --separate --input=/tmp/workflows_import
-        )
-    ) else (
-        docker exec -u node %CONTAINER_NAME% n8n import:workflow --separate --input=/tmp/workflows_import
-    )
+    docker exec -u node %CONTAINER_NAME% n8n import:workflow --separate --input=/tmp/workflows_import
 
     if errorlevel 1 (
         echo ERROR: Failed to import workflows
-        REM Try to cleanup anyway
-        docker exec -u node %CONTAINER_NAME% rm -rf /tmp/workflows_import 2>nul
-        exit /b 1
     ) else (
         echo Workflows imported successfully
-        REM Cleanup (ignore errors)
-        docker exec -u node %CONTAINER_NAME% rm -rf /tmp/workflows_import 2>nul
+    )
+    docker exec -u node %CONTAINER_NAME% rm -rf /tmp/workflows_import 2>nul
+) else (
+    n8n import:workflow --separate --input="%WORKFLOWS_DIR%"
+    if errorlevel 1 (
+        echo ERROR: Failed to import workflows
+    ) else (
+        echo Workflows imported successfully
     )
 )
 

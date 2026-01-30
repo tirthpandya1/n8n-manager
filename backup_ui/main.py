@@ -8,7 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pathlib import Path
 
-from api import backup_router, config_router, status_router
+from api import backup_router, config_router, status_router, hosts_router
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -32,6 +32,7 @@ templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 app.include_router(backup_router)
 app.include_router(config_router)
 app.include_router(status_router)
+app.include_router(hosts_router)
 
 
 # Web UI Routes
@@ -57,6 +58,12 @@ async def restore_page(request: Request):
 async def config_page(request: Request):
     """Configuration page"""
     return templates.TemplateResponse("config.html", {"request": request})
+
+
+@app.get("/hosts", response_class=HTMLResponse)
+async def hosts_page(request: Request):
+    """Remote hosts management page"""
+    return templates.TemplateResponse("hosts.html", {"request": request})
 
 
 if __name__ == "__main__":

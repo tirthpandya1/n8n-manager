@@ -16,7 +16,8 @@ NC='\033[0m' # No Color
 # Get script directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 N8N_DIR="$(dirname "$SCRIPT_DIR")"
-BACKUP_BASE_DIR="$N8N_DIR/backups"
+BACKUP_BASE_DIR="${N8N_BACKUP_DIR:-$N8N_DIR/backups}"
+NON_INTERACTIVE=false
 
 # Default values
 CONTAINER_NAME="n8n"
@@ -60,6 +61,7 @@ show_usage() {
     echo "  backup_name         Name of enhanced backup to restore"
     echo "  container_name      Name of Docker container (default: n8n)"
     echo "  --recreate-container Recreate container from backup configuration"
+    echo "  --non-interactive   Skip confirmation prompts"
     echo ""
     echo "Examples:"
     echo "  $0 docker_enhanced_backup_20240115_143022"
@@ -96,6 +98,10 @@ while [[ $# -gt 0 ]]; do
             RECREATE_CONTAINER=true
             shift
             ;;
+        --non-interactive)
+            NON_INTERACTIVE=true
+            shift
+            ;;
         -h|--help)
             show_usage
             exit 0
@@ -120,23 +126,42 @@ print_status "Recreate container: $RECREATE_CONTAINER"
 
 # Function to extract enhanced backup
 extract_enhanced_backup() {
-    local compressed_backup="$BACKUP_BASE_DIR/${BACKUP_NAME}.tar.gz"
+    # Strip extensions from BACKUP_NAME if present
+    CLEAN_BACKUP_NAME=$(echo "$BACKUP_NAME" | sed 's/\.tar\.gz$//' | sed 's/\.zip$//')
+    local compressed_backup="$BACKUP_BASE_DIR/${CLEAN_BACKUP_NAME}.tar.gz"
     
-    if [ ! -f "$compressed_backup" ]; then
-        print_error "Enhanced backup not found: $compressed_backup"
+    if [ -f "$compressed_backup" ]; then
+        print_status "Extracting enhanced backup (tar.gz)..."
+        TEMP_EXTRACT_DIR="$BACKUP_BASE_DIR/temp_restore_$$"
+        mkdir -p "$TEMP_EXTRACT_DIR"
+        if ! tar -xzf "$compressed_backup" -C "$TEMP_EXTRACT_DIR"; then
+            print_error "Extraction failed"
+            exit 1
+        fi
+    elif [ -f "$BACKUP_BASE_DIR/${CLEAN_BACKUP_NAME}.zip" ]; then
+        local zip_backup="$BACKUP_BASE_DIR/${CLEAN_BACKUP_NAME}.zip"
+        print_status "Extracting enhanced backup (zip)..."
+        TEMP_EXTRACT_DIR="$BACKUP_BASE_DIR/temp_restore_$$"
+        mkdir -p "$TEMP_EXTRACT_DIR"
+        if command -v unzip &> /dev/null; then
+            unzip -q "$zip_backup" -d "$TEMP_EXTRACT_DIR"
+        else
+            print_error "unzip command not found. Please install unzip."
+            exit 1
+        fi
+    else
+        print_error "Enhanced backup not found in $BACKUP_BASE_DIR"
         list_available_backups
         exit 1
     fi
     
-    print_status "Extracting enhanced backup..."
-    TEMP_EXTRACT_DIR="$BACKUP_BASE_DIR/temp_restore_$$"
-    mkdir -p "$TEMP_EXTRACT_DIR"
     
-    tar -xzf "$compressed_backup" -C "$TEMP_EXTRACT_DIR"
-    BACKUP_DIR="$TEMP_EXTRACT_DIR/$BACKUP_NAME"
-    
-    if [ ! -d "$BACKUP_DIR" ]; then
-        print_error "Invalid backup structure"
+    if [ -d "$TEMP_EXTRACT_DIR/$CLEAN_BACKUP_NAME" ]; then
+        BACKUP_DIR="$TEMP_EXTRACT_DIR/$CLEAN_BACKUP_NAME"
+    elif [ -d "$TEMP_EXTRACT_DIR/workflows" ] || [ -d "$TEMP_EXTRACT_DIR/volumes" ]; then
+        BACKUP_DIR="$TEMP_EXTRACT_DIR"
+    else
+        print_error "Invalid backup structure - content not found in extraction"
         exit 1
     fi
     
@@ -261,7 +286,11 @@ run_standard_restore() {
         
         if [ -n "$standard_backup_dir" ]; then
             # Use the standard restore script
-            "$SCRIPT_DIR/restore_n8n.sh" docker "$(basename "$standard_backup_dir")" "$CONTAINER_NAME"
+            local extra_flags=""
+            if [ "$NON_INTERACTIVE" = true ]; then
+                extra_flags="--non-interactive"
+            fi
+            "$SCRIPT_DIR/restore_n8n.sh" $extra_flags docker "$(basename "$standard_backup_dir")" "$CONTAINER_NAME"
         else
             print_error "Could not find standard backup directory"
         fi
@@ -319,6 +348,9 @@ check_final_status() {
 
 # Function to confirm restore
 confirm_restore() {
+    if [ "$NON_INTERACTIVE" = true ]; then
+        return 0
+    fi
     print_warning "This will restore an enhanced Docker backup to container '$CONTAINER_NAME'"
     
     if [ "$RECREATE_CONTAINER" = true ]; then
