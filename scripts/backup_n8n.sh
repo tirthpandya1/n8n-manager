@@ -6,6 +6,9 @@
 
 set -e
 
+# Prevent Git Bash path conversion on Windows
+export MSYS_NO_PATHCONV=1
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -99,57 +102,67 @@ print_status "Backup directory: $BACKUP_DIR"
 
 # Function to detect and set encryption key
 detect_encryption_key() {
-    local config_file="$HOME/.n8n/config"
-    local config_key=""
     local env_key="$N8N_ENCRYPTION_KEY"
     
-    # Always try to read from config file first
-    if [ -f "$config_file" ]; then
-        print_status "Reading encryption key from n8n config file..."
+    if [ "$INSTANCE_TYPE" = "native" ]; then
+        local config_file="$HOME/.n8n/config"
+        local config_key=""
         
-        # Try with jq first (more reliable)
-        if command -v jq &> /dev/null; then
-            config_key=$(jq -r '.encryptionKey // empty' "$config_file" 2>/dev/null)
-        else
-            # Fallback: extract key using grep and sed (no jq dependency)
-            config_key=$(grep -o '"encryptionKey"[[:space:]]*:[[:space:]]*"[^"]*"' "$config_file" 2>/dev/null | sed 's/.*"encryptionKey"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/')
-        fi
-    fi
-    
-    # Decide which key to use and check for mismatches
-    if [ -n "$config_key" ] && [ "$config_key" != "null" ] && [ "$config_key" != "empty" ]; then
-        if [ -n "$env_key" ] && [ "$env_key" != "$config_key" ]; then
-            print_warning "Encryption key mismatch detected!"
-            print_status "Environment key: ${env_key:0:8}...${env_key: -8}"
-            print_status "Config file key:  ${config_key:0:8}...${config_key: -8}"
-            print_status "Using config file key (authoritative source)"
-        fi
-        
-        export N8N_ENCRYPTION_KEY="$config_key"
-        print_success "Using encryption key from config file"
-        print_status "Key: ${config_key:0:8}...${config_key: -8} (${#config_key} characters)"
-        
-    elif [ -n "$env_key" ]; then
-        print_warning "No config file key found, using environment variable"
-        print_status "Key: ${env_key:0:8}...${env_key: -8} (${#env_key} characters)"
-        
-    else
-        print_warning "No encryption key available on host!"
-        print_status "Neither environment variable N8N_ENCRYPTION_KEY nor config file key found"
-        
-        if [ "$INSTANCE_TYPE" = "docker" ]; then
-            print_status "Attempting to detect key from Docker container..."
-            docker_key=$(docker exec "$CONTAINER_NAME" printenv N8N_ENCRYPTION_KEY 2>/dev/null || true)
-            if [ -n "$docker_key" ]; then
-                export N8N_ENCRYPTION_KEY="$docker_key"
-                print_success "Using encryption key from Docker container"
-                return 0
+        # Try to read from config file first
+        if [ -f "$config_file" ]; then
+            print_status "Reading encryption key from n8n config file..."
+            
+            # Try with jq first (more reliable)
+            if command -v jq &> /dev/null; then
+                config_key=$(jq -r '.encryptionKey // empty' "$config_file" 2>/dev/null)
+            else
+                # Fallback: extract key using grep and sed (no jq dependency)
+                config_key=$(grep -o '"encryptionKey"[[:space:]]*:[[:space:]]*"[^"]*"' "$config_file" 2>/dev/null | sed 's/.*"encryptionKey"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/')
             fi
         fi
+        
+        # Decide which key to use and check for mismatches
+        if [ -n "$config_key" ] && [ "$config_key" != "null" ] && [ "$config_key" != "empty" ]; then
+            if [ -n "$env_key" ] && [ "$env_key" != "$config_key" ]; then
+                print_warning "Encryption key mismatch detected!"
+                print_status "Environment key: ${env_key:0:8}...${env_key: -8}"
+                print_status "Config file key:  ${config_key:0:8}...${config_key: -8}"
+                print_status "Using config file key (authoritative source)"
+            fi
+            
+            export N8N_ENCRYPTION_KEY="$config_key"
+            print_success "Using encryption key from config file"
+            return 0
+            
+        elif [ -n "$env_key" ]; then
+            print_warning "No config file key found, using environment variable"
+            return 0
+        fi
+    elif [ "$INSTANCE_TYPE" = "docker" ]; then
+        print_status "Attempting to detect key from Docker container..."
+        
+        # 1st attempt: Check runtime environment variables attached to the container
+        docker_env_key=$(docker inspect --format='{{range .Config.Env}}{{println .}}{{end}}' "$CONTAINER_NAME" 2>/dev/null | grep '^N8N_ENCRYPTION_KEY=' | cut -d'=' -f2)
+        
+        if [ -n "$docker_env_key" ] && [[ ! "$docker_env_key" == *"OCI "* ]]; then
+            export N8N_ENCRYPTION_KEY="$docker_env_key"
+            print_success "Using encryption key from Docker inspect environment"
+            return 0
+        fi
 
-        print_warning "Proceeding without N8N_ENCRYPTION_KEY. Backup might fail if credentials are encrypted."
-        return 0
+        # 2nd attempt: Read the n8n config file physically inside the container
+        # Note: MSYS_NO_PATHCONV is required on Windows runners so /home is not translated
+        docker_config_key=$(MSYS_NO_PATHCONV=1 docker exec "$CONTAINER_NAME" cat /home/node/.n8n/config 2>/dev/null | grep '"encryptionKey"' 2>/dev/null | cut -d':' -f2 | tr -d ' ",' 2>/dev/null | head -n 1 || echo "")
+        
+        if [ -n "$docker_config_key" ] && [ "$docker_config_key" != "null" ] && [ "$docker_config_key" != "empty" ] && [[ ! "$docker_config_key" == *"OCI"* ]] && [[ ! "$docker_config_key" == *" "* ]]; then
+            export N8N_ENCRYPTION_KEY="$docker_config_key"
+            print_success "Using encryption key from Docker container config"
+            return 0
+        fi
     fi
+
+    print_warning "Proceeding without N8N_ENCRYPTION_KEY. Backup might fail if credentials are encrypted."
+    return 0
 }
 
 # Function to detect n8n command
@@ -301,6 +314,11 @@ backup_credentials() {
         print_success "Exported $CREDENTIAL_COUNT credentials"
     else
         print_warning "No credentials file created (possibly no credentials to export)"
+    fi
+
+    if [ -n "$N8N_ENCRYPTION_KEY" ]; then
+        echo "$N8N_ENCRYPTION_KEY" > "$BACKUP_DIR/encryption_key.txt"
+        print_success "Exported encryption key to backup"
     fi
 }
 

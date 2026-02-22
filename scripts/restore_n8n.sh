@@ -213,6 +213,11 @@ detect_encryption_key() {
     local config_file="$HOME/.n8n/config"
     local config_key=""
     local env_key="$N8N_ENCRYPTION_KEY"
+    local backup_key=""
+    
+    if [ -n "$BACKUP_DIR" ] && [ -f "$BACKUP_DIR/encryption_key.txt" ]; then
+        backup_key=$(cat "$BACKUP_DIR/encryption_key.txt" | tr -d '\r\n')
+    fi
     
     # Always try to read from config file first
     if [ -f "$config_file" ]; then
@@ -228,7 +233,19 @@ detect_encryption_key() {
     fi
     
     # Decide which key to use and check for mismatches
-    if [ -n "$config_key" ] && [ "$config_key" != "null" ] && [ "$config_key" != "empty" ]; then
+    if [ -n "$backup_key" ]; then
+        if [ -n "$config_key" ] && [ "$config_key" != "null" ] && [ "$config_key" != "empty" ] && [ "$backup_key" != "$config_key" ]; then
+            print_warning "Encryption key in backup differs from config file!"
+        fi
+        if [ -n "$env_key" ] && [ "$env_key" != "$backup_key" ]; then
+            print_warning "Encryption key in backup differs from environment variable!"
+        fi
+        
+        export N8N_ENCRYPTION_KEY="$backup_key"
+        print_success "Using encryption key from backup files"
+        print_status "Key: ${backup_key:0:8}...${backup_key: -8} (${#backup_key} characters)"
+        
+    elif [ -n "$config_key" ] && [ "$config_key" != "null" ] && [ "$config_key" != "empty" ]; then
         if [ -n "$env_key" ] && [ "$env_key" != "$config_key" ]; then
             print_warning "Encryption key mismatch detected!"
             print_status "Environment key: ${env_key:0:8}...${env_key: -8}"
@@ -379,11 +396,27 @@ detect_n8n_version_and_user() {
     if [ "$n8n_major_version" -ge 2 ] 2>/dev/null; then
         print_status "n8n v2+ detected - will use userId parameter for imports"
 
-        # Use a default UUID that n8n v2 accepts
-        # This will assign workflows to the first/default user
-        export N8N_USER_ID="00000000-0000-0000-0000-000000000000"
+        local detected_user_id=""
+        
+        # Strategy 1: Try to pull the first user ID from Postgres if it's a docker setup
+        if [ "$INSTANCE_TYPE" = "docker" ]; then
+            print_status "Attempting to detect admin user ID from n8n database..."
+            # Try to find a postgres container linked to chatwoot/n8n
+            local pg_container=$(docker ps --format "{{.Names}}" | grep postgres | head -n 1)
+            if [ -n "$pg_container" ]; then
+                detected_user_id=$(docker exec "$pg_container" psql -U postgres -d n8n -t -c "SELECT id FROM \"user\" ORDER BY \"createdAt\" ASC LIMIT 1;" 2>/dev/null | tr -d '[:space:]')
+            fi
+        fi
 
-        print_status "Using default user ID for workflow import: $N8N_USER_ID"
+        if [ -n "$detected_user_id" ] && [[ "$detected_user_id" =~ ^[0-9a-fA-F-] ]]; then
+            export N8N_USER_ID="$detected_user_id"
+            print_success "Detected active admin user ID: $N8N_USER_ID"
+        else
+            # Use a default UUID that n8n v2 accepts as a last resort
+            export N8N_USER_ID="00000000-0000-0000-0000-000000000000"
+            print_warning "Could not detect active user. Using default user ID: $N8N_USER_ID"
+            print_status "Note: Import may fail if you haven't created an account in the UI yet."
+        fi
     else
         print_status "n8n v1 detected - userId parameter not needed"
     fi
@@ -536,11 +569,22 @@ restore_credentials() {
     print_status "Importing credentials..."
 
     if [ "$INSTANCE_TYPE" = "native" ]; then
+        set +e
         $N8N_CMD import:credentials --input="$credentials_file"
-        if [ $? -eq 0 ]; then
+        import_status=$?
+        set -e
+        
+        if [ $import_status -eq 0 ]; then
             print_success "Credentials imported successfully"
         else
-            print_warning "Failed to import credentials (exit code: $?)"
+            print_error "Failed to import credentials (exit code: $import_status)"
+            echo ""
+            print_warning "🚨 RESTORE INCOMPLETE: Credentials failed to import 🚨"
+            print_status "If you are migrating to n8n v2+, credentials CANNOT be imported until an owner account is set up."
+            print_status "1. Open your n8n interface in the browser"
+            print_status "2. Create your initial owner account (this creates the required 'Personal' project)"
+            print_status "3. Run this restore script AGAIN to successfully import your credentials."
+            echo ""
         fi
     else
         # Copy credentials to container
@@ -564,10 +608,14 @@ restore_credentials() {
         if [ $import_status -eq 0 ]; then
             print_success "Credentials imported successfully"
         else
-            print_warning "Failed to import credentials (exit code: $import_status)"
-            if [[ "$import_status" -eq 1 ]]; then
-                print_status "TIP: If you see 'Project' matching errors, ensure you have created an owner user in the n8n UI first."
-            fi
+            print_error "Failed to import credentials (exit code: $import_status)"
+            echo ""
+            print_warning "🚨 RESTORE INCOMPLETE: Credentials failed to import 🚨"
+            print_status "If you are migrating to n8n v2+, credentials CANNOT be imported until an owner account is set up."
+            print_status "1. Open your n8n interface in the browser"
+            print_status "2. Create your initial owner account (this creates the required 'Personal' project)"
+            print_status "3. Run this restore script AGAIN to successfully import your credentials."
+            echo ""
         fi
     fi
 }
@@ -734,9 +782,9 @@ main() {
     print_status "=========================="
     
     # Check prerequisites
+    prepare_backup
     check_n8n_access
     detect_n8n_version_and_user
-    prepare_backup
     show_backup_info
     check_encryption_key
     
